@@ -103,39 +103,181 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.100:3000
 
 ---
 
-## Getting Started
+## 🚀 How to Start This App (Step-by-Step)
 
-### 1. Prerequisites
-- Flutter SDK `^3.13.0` (Dart SDK `^3.1.0`)
-- Node.js `^18` (for the backend server in `backend_repo/`)
+This project has **two parts**: a Node.js custom backend (`backend_repo/`) and a Flutter mobile app.  
+Both must be running at the same time for the app to work properly.
 
-### 2. Start the Backend
+---
+
+### Prerequisites
+
+| Tool | Minimum Version | Check |
+|------|----------------|-------|
+| [Flutter SDK](https://docs.flutter.dev/get-started/install) | `3.13.0` | `flutter --version` |
+| [Node.js](https://nodejs.org/) | `18.x` | `node --version` |
+| [Android SDK & ADB](https://developer.android.com/studio) | latest | `adb --version` |
+| USB Debugging | enabled on device | Settings → Developer Options |
+
+---
+
+### Step 1 — Set Up the Backend
+
 ```bash
+# Navigate to backend folder
 cd backend_repo
+
+# Install Node.js dependencies
 npm install
-npx prisma generate
-npm run dev
+
+# Copy the environment file (fill in your Neon DB URL, Clerk keys, etc.)
+copy .env.example .env
 ```
 
-### 3. Run the Flutter App
-#### Physical Android Device (USB Debugging)
+Open `backend_repo/.env` and fill in the following variables:
+
+```env
+DATABASE_URL=postgresql://<user>:<password>@<host>/<db>?sslmode=require
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+MUX_TOKEN_ID=...
+MUX_TOKEN_SECRET=...
+UPLOADTHING_SECRET=...
+UPLOADTHING_APP_ID=...
+STRIPE_API_KEY=sk_test_...
+LIVEKIT_API_KEY=...
+LIVEKIT_API_SECRET=...
+NEXT_PUBLIC_LIVEKIT_URL=wss://...
+NEXT_PUBLIC_TEACHER_ID=user_...
+```
+
+---
+
+### Step 2 — Start the Backend Server
+
+The backend uses a **custom Node.js server** (`server.js`), NOT `npm run dev`.
+
 ```bash
-flutter run -d <device-id>
+# From inside backend_repo/
+node server.js
 ```
 
-#### Chrome Web
+You should see:
+```
+[Termini LMS Server] Running at http://0.0.0.0:3000
+[DB] Connected to Neon PostgreSQL successfully!
+```
+
+> ⚠️ **Keep this terminal open.** The server must stay running while you use the app.
+
+---
+
+### Step 3 — Connect Your Android Device
+
+1. Enable **USB Debugging** on your Android phone (Settings → Developer Options).
+2. Plug in via USB and verify it's detected:
+
+```bash
+adb devices
+# Should show: R9WW30565LK   device  (or your device serial)
+```
+
+3. Forward port 3000 from the device to your PC so the phone can reach the backend:
+
+```bash
+adb reverse tcp:3000 tcp:3000
+```
+
+> Run this command **every time** you reconnect the device.
+
+---
+
+### Step 4 — Run the Flutter App
+
+#### Option A — Run from source (requires Flutter SDK)
+```bash
+# From the project root (termini/)
+flutter run -d <your-device-id>
+
+# Example with your device:
+flutter run -d R9WW30565LK
+```
+
+#### Option B — Install pre-built APK directly
+If you have a built APK (from `build/app/outputs/flutter-apk/`):
+
+```bash
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+
+# Then launch the app
+adb shell am start -n com.helloflix.termini/com.helloflix.termini.MainActivity
+```
+
+#### Option B — Build the APK yourself
+```bash
+flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+adb shell am start -n com.helloflix.termini/com.helloflix.termini.MainActivity
+```
+
+---
+
+### Step 5 — Verify Everything Works
+
+Open the app on your phone. You should see:
+- ✅ Dashboard loads with your courses from the Neon PostgreSQL database
+- ✅ Courses display with thumbnails and chapter lists
+- ✅ Video playback works inside chapters
+- ✅ Authentication (Sign In / Sign Up) works via Clerk
+
+---
+
+### Quick Start Cheatsheet
+
+Every time you want to run the app after the initial setup:
+
+```bash
+# Terminal 1 — Start backend
+cd backend_repo
+node server.js
+
+# Terminal 2 — Forward port & launch app
+adb reverse tcp:3000 tcp:3000
+flutter run -d R9WW30565LK
+```
+
+---
+
+### Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `Lost connection to device` | Reconnect USB + run `adb reverse tcp:3000 tcp:3000` again |
+| `No devices found` | Enable USB Debugging, run `adb devices` to verify |
+| App shows empty dashboard | Make sure `node server.js` is running and port is forwarded |
+| Video won't play | Check that backend is running; videos stream via `http://localhost:3000/api/videos/:id` |
+| `flutter: ProcessStarter` error | Run using the full path: `C:\src\flutter\bin\flutter.bat run -d <device>` |
+
+---
+
+## Getting Started (Web / Desktop)
+
+### Chrome Web
 ```bash
 flutter run -d chrome
 ```
 
-#### Windows / macOS / Linux Desktop
+### Windows Desktop
 ```bash
 flutter run -d windows
 ```
 
-### 4. Code Quality & Testing
+---
+
+## Code Quality & Testing
+
 ```bash
-# Run static analysis (0 errors, 0 warnings enforced)
+# Run static analysis
 flutter analyze
 
 # Run unit and widget test suite
