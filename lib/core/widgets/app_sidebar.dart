@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/domain/user_entity.dart';
-import '../theme/theme_provider.dart';
 
 class SidebarItemData {
   final IconData icon;
@@ -44,32 +45,11 @@ const List<SidebarItemData> studentRoutes = [
     badge: 'Hub',
     badgeColor: Color(0xFF0284C7),
   ),
-];
-
-const List<SidebarItemData> teacherRoutes = [
-  SidebarItemData(
-    icon: Icons.list_alt_rounded,
-    activeIcon: Icons.list_alt_rounded,
-    label: 'Course Studio',
-    route: '/teacher/courses',
-  ),
-  SidebarItemData(
-    icon: Icons.bar_chart_rounded,
-    activeIcon: Icons.bar_chart_rounded,
-    label: 'Analytics',
-    route: '/teacher/analytics',
-  ),
-  SidebarItemData(
-    icon: Icons.forum_outlined,
-    activeIcon: Icons.forum_rounded,
-    label: 'Community',
-    route: '/teacher/community',
-  ),
   SidebarItemData(
     icon: Icons.videocam_outlined,
     activeIcon: Icons.videocam_rounded,
-    label: 'Live ShortMeet',
-    route: '/teacher/meet',
+    label: 'ShortMeet',
+    route: '/shortmeet',
     badge: 'LIVE',
     badgeColor: Color(0xFFEF4444),
   ),
@@ -94,9 +74,9 @@ class AppSidebar extends ConsumerWidget {
     final isDark = theme.brightness == Brightness.dark;
     final currentUser = ref.watch(currentUserProvider);
     final canTeach = currentUser?.isTeacher ?? false;
-    final isTeacherMode = currentRoute.startsWith('/teacher');
 
-    final activeRoutes = isTeacherMode ? teacherRoutes : studentRoutes;
+    // Always student routes only — teacher mode removed
+    const activeRoutes = studentRoutes;
 
     return Container(
       width: isCollapsed ? 76 : 260,
@@ -171,17 +151,24 @@ class AppSidebar extends ConsumerWidget {
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
                                   colors: [
                                     colorScheme.primary.withValues(alpha: 0.2),
-                                    colorScheme.secondary.withValues(alpha: 0.1),
+                                    colorScheme.secondary.withValues(
+                                      alpha: 0.1,
+                                    ),
                                   ],
                                 ),
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(
-                                  color: colorScheme.primary.withValues(alpha: 0.4),
+                                  color: colorScheme.primary.withValues(
+                                    alpha: 0.4,
+                                  ),
                                   width: 0.8,
                                 ),
                               ),
@@ -200,7 +187,9 @@ class AppSidebar extends ConsumerWidget {
                         Text(
                           'Learning Platform',
                           style: theme.textTheme.labelSmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                            color: colorScheme.onSurfaceVariant.withValues(
+                              alpha: 0.8,
+                            ),
                             fontSize: 11,
                           ),
                         ),
@@ -214,101 +203,10 @@ class AppSidebar extends ConsumerWidget {
 
           Divider(
             height: 1,
-            color: isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : Colors.black.withValues(alpha: 0.06),
           ),
-
-          // 2. Mode Switcher Card (Back to Learning / Open Studio)
-          if (true) ...[
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isCollapsed ? 8 : 14,
-                vertical: 14,
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () {
-                  onNavigate?.call();
-                  if (isTeacherMode) {
-                    context.go('/');
-                  } else {
-                    context.go('/teacher/courses');
-                  }
-                },
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isCollapsed ? 8 : 12,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: isTeacherMode
-                          ? [
-                              const Color(0xFF6366F1).withValues(alpha: 0.15),
-                              const Color(0xFF8B5CF6).withValues(alpha: 0.08),
-                            ]
-                          : [
-                              const Color(0xFF0284C7).withValues(alpha: 0.15),
-                              const Color(0xFF38BDF8).withValues(alpha: 0.08),
-                            ],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: isTeacherMode
-                          ? const Color(0xFF8B5CF6).withValues(alpha: 0.3)
-                          : const Color(0xFF0284C7).withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(7),
-                        decoration: BoxDecoration(
-                          color: (isTeacherMode ? const Color(0xFF8B5CF6) : const Color(0xFF0284C7))
-                              .withValues(alpha: 0.2),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          isTeacherMode ? Icons.auto_stories_rounded : Icons.admin_panel_settings_rounded,
-                          size: 16,
-                          color: isTeacherMode ? const Color(0xFFA78BFA) : const Color(0xFF38BDF8),
-                        ),
-                      ),
-                      if (!isCollapsed) ...[
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                isTeacherMode ? 'Back to Student' : 'Teacher Studio',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12.5,
-                                ),
-                              ),
-                              Text(
-                                isTeacherMode ? 'Switch to learner' : 'Manage your courses',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
-                                  fontSize: 10.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.swap_horiz_rounded,
-                          size: 18,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
 
           // 3. Navigation Links Section
           Padding(
@@ -323,18 +221,22 @@ class AppSidebar extends ConsumerWidget {
                   Padding(
                     padding: const EdgeInsets.only(left: 8, top: 4, bottom: 8),
                     child: Text(
-                      isTeacherMode ? 'CREATOR STUDIO' : 'LEARNING SUITE',
+                      'LEARNING SUITE',
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.4,
-                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.8,
+                        ),
                       ),
                     ),
                   ),
                 ...activeRoutes.map((item) {
-                  final isActive = currentRoute == item.route ||
-                      (item.route != '/' && currentRoute.startsWith(item.route));
+                  final isActive =
+                      currentRoute == item.route ||
+                      (item.route != '/' &&
+                          currentRoute.startsWith(item.route));
 
                   return Container(
                     margin: const EdgeInsets.symmetric(vertical: 3),
@@ -351,7 +253,9 @@ class AppSidebar extends ConsumerWidget {
                         ),
                         decoration: BoxDecoration(
                           color: isActive
-                              ? colorScheme.primary.withValues(alpha: isDark ? 0.14 : 0.08)
+                              ? colorScheme.primary.withValues(
+                                  alpha: isDark ? 0.14 : 0.08,
+                                )
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
@@ -375,7 +279,9 @@ class AppSidebar extends ConsumerWidget {
                                   borderRadius: BorderRadius.circular(3),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: colorScheme.primary.withValues(alpha: 0.6),
+                                      color: colorScheme.primary.withValues(
+                                        alpha: 0.6,
+                                      ),
                                       blurRadius: 6,
                                     ),
                                   ],
@@ -383,7 +289,9 @@ class AppSidebar extends ConsumerWidget {
                               ),
                             ],
                             Icon(
-                              isActive ? (item.activeIcon ?? item.icon) : item.icon,
+                              isActive
+                                  ? (item.activeIcon ?? item.icon)
+                                  : item.icon,
                               size: 20,
                               color: isActive
                                   ? colorScheme.primary
@@ -399,7 +307,9 @@ class AppSidebar extends ConsumerWidget {
                                         ? FontWeight.w700
                                         : FontWeight.w500,
                                     color: isActive
-                                        ? (isDark ? Colors.white : Colors.black87)
+                                        ? (isDark
+                                              ? Colors.white
+                                              : Colors.black87)
                                         : colorScheme.onSurfaceVariant,
                                     fontSize: 13.5,
                                   ),
@@ -407,12 +317,20 @@ class AppSidebar extends ConsumerWidget {
                               ),
                               if (item.badge != null) ...[
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
-                                    color: (item.badgeColor ?? colorScheme.primary).withValues(alpha: 0.18),
+                                    color:
+                                        (item.badgeColor ?? colorScheme.primary)
+                                            .withValues(alpha: 0.18),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
-                                      color: (item.badgeColor ?? colorScheme.primary).withValues(alpha: 0.4),
+                                      color:
+                                          (item.badgeColor ??
+                                                  colorScheme.primary)
+                                              .withValues(alpha: 0.4),
                                     ),
                                   ),
                                   child: Text(
@@ -421,7 +339,9 @@ class AppSidebar extends ConsumerWidget {
                                       fontSize: 9.5,
                                       fontWeight: FontWeight.w800,
                                       letterSpacing: 0.6,
-                                      color: item.badgeColor ?? colorScheme.primary,
+                                      color:
+                                          item.badgeColor ??
+                                          colorScheme.primary,
                                     ),
                                   ),
                                 ),
@@ -450,7 +370,9 @@ class AppSidebar extends ConsumerWidget {
                       ),
                       decoration: BoxDecoration(
                         color: currentRoute == '/profile'
-                            ? colorScheme.primary.withValues(alpha: isDark ? 0.14 : 0.08)
+                            ? colorScheme.primary.withValues(
+                                alpha: isDark ? 0.14 : 0.08,
+                              )
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
@@ -474,7 +396,9 @@ class AppSidebar extends ConsumerWidget {
                                 borderRadius: BorderRadius.circular(3),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: colorScheme.primary.withValues(alpha: 0.6),
+                                    color: colorScheme.primary.withValues(
+                                      alpha: 0.6,
+                                    ),
                                     blurRadius: 6,
                                   ),
                                 ],
@@ -482,7 +406,9 @@ class AppSidebar extends ConsumerWidget {
                             ),
                           ],
                           Icon(
-                            currentRoute == '/profile' ? Icons.settings_rounded : Icons.settings_outlined,
+                            currentRoute == '/profile'
+                                ? Icons.settings_rounded
+                                : Icons.settings_outlined,
                             size: 20,
                             color: currentRoute == '/profile'
                                 ? colorScheme.primary
@@ -582,20 +508,17 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
     final user = widget.currentUser;
     final initials = user?.firstName?.isNotEmpty == true
         ? user!.firstName![0].toUpperCase()
-        : (user?.email.isNotEmpty == true
-            ? user!.email[0].toUpperCase()
-            : 'U');
+        : (user?.email.isNotEmpty == true ? user!.email[0].toUpperCase() : 'U');
 
-    final bgColor = widget.isDark
-        ? const Color(0xFF131720)
-        : Colors.white;
+    final bgColor = widget.isDark ? const Color(0xFF131720) : Colors.white;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
-          widget.isCollapsed ? 8 : 12,
-          8,
-          widget.isCollapsed ? 8 : 12,
-          12),
+        widget.isCollapsed ? 8 : 12,
+        8,
+        widget.isCollapsed ? 8 : 12,
+        12,
+      ),
       child: widget.isCollapsed
           // Collapsed: just show avatar
           ? GestureDetector(
@@ -625,10 +548,11 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                             : null,
                         boxShadow: [
                           BoxShadow(
-                            color: (widget.canTeach
-                                    ? const Color(0xFF8B5CF6)
-                                    : const Color(0xFF0284C7))
-                                .withValues(alpha: 0.4),
+                            color:
+                                (widget.canTeach
+                                        ? const Color(0xFF8B5CF6)
+                                        : const Color(0xFF0284C7))
+                                    .withValues(alpha: 0.4),
                             blurRadius: 14,
                             offset: const Offset(0, 4),
                           ),
@@ -636,13 +560,23 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                       ),
                       child: user?.imageUrl != null
                           ? ClipOval(
-                              child: Image.network(user!.imageUrl!,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Center(
-                                      child: Text(initials,
-                                          style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold)))),
+                              child: CachedNetworkImage(
+                                imageUrl: user!.imageUrl!,
+                                width: 40,
+                                height: 40,
+                                memCacheWidth: 120,
+                                memCacheHeight: 120,
+                                fit: BoxFit.cover,
+                                errorWidget: (_, _, _) => Center(
+                                  child: Text(
+                                    initials,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             )
                           : Center(
                               child: Text(
@@ -682,18 +616,18 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                 decoration: BoxDecoration(
                   color: _hovered
                       ? (widget.isDark
-                          ? Colors.white.withValues(alpha: 0.06)
-                          : Colors.black.withValues(alpha: 0.04))
+                            ? Colors.white.withValues(alpha: 0.06)
+                            : Colors.black.withValues(alpha: 0.04))
                       : (widget.isDark
-                          ? Colors.white.withValues(alpha: 0.03)
-                          : Colors.black.withValues(alpha: 0.02)),
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : Colors.black.withValues(alpha: 0.02)),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: _hovered
                         ? widget.colorScheme.primary.withValues(alpha: 0.2)
                         : widget.isDark
-                            ? Colors.white.withValues(alpha: 0.07)
-                            : Colors.black.withValues(alpha: 0.06),
+                        ? Colors.white.withValues(alpha: 0.07)
+                        : Colors.black.withValues(alpha: 0.06),
                   ),
                 ),
                 child: Column(
@@ -728,10 +662,11 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                                       : null,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: (widget.canTeach
-                                              ? const Color(0xFF8B5CF6)
-                                              : const Color(0xFF0284C7))
-                                          .withValues(alpha: 0.4),
+                                      color:
+                                          (widget.canTeach
+                                                  ? const Color(0xFF8B5CF6)
+                                                  : const Color(0xFF0284C7))
+                                              .withValues(alpha: 0.4),
                                       blurRadius: 14,
                                       offset: const Offset(0, 4),
                                     ),
@@ -739,15 +674,21 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                                 ),
                                 child: user?.imageUrl != null
                                     ? ClipOval(
-                                        child: Image.network(
-                                          user!.imageUrl!,
+                                        child: CachedNetworkImage(
+                                          imageUrl: user!.imageUrl!,
+                                          width: 40,
+                                          height: 40,
+                                          memCacheWidth: 120,
+                                          memCacheHeight: 120,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => Center(
-                                            child: Text(initials,
-                                                style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight:
-                                                        FontWeight.bold)),
+                                          errorWidget: (_, _, _) => Center(
+                                            child: Text(
+                                              initials,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       )
@@ -772,8 +713,10 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                                   decoration: BoxDecoration(
                                     color: const Color(0xFF10B981),
                                     shape: BoxShape.circle,
-                                    border:
-                                        Border.all(color: bgColor, width: 2),
+                                    border: Border.all(
+                                      color: bgColor,
+                                      width: 2,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -816,7 +759,9 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                                 const SizedBox(height: 4),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 7, vertical: 2),
+                                    horizontal: 7,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     gradient: LinearGradient(
                                       colors: widget.canTeach
@@ -837,13 +782,15 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                                     border: Border.all(
                                       color: widget.canTeach
                                           ? const Color(0xFF8B5CF6)
-                                              .withValues(alpha: 0.35)
+                                                .withValues(alpha: 0.35)
                                           : const Color(0xFF0284C7)
-                                              .withValues(alpha: 0.35),
+                                                .withValues(alpha: 0.35),
                                     ),
                                   ),
                                   child: Text(
-                                    widget.canTeach ? '✦ INSTRUCTOR' : '✦ STUDENT',
+                                    widget.canTeach
+                                        ? '✦ INSTRUCTOR'
+                                        : '✦ STUDENT',
                                     style: TextStyle(
                                       fontSize: 9,
                                       fontWeight: FontWeight.w800,
@@ -916,8 +863,7 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                           ),
                           _StatChip(
                             label: 'Hours',
-                            value: user.stats.hoursLearned
-                                .toStringAsFixed(1),
+                            value: user.stats.hoursLearned.toStringAsFixed(1),
                             icon: Icons.schedule_rounded,
                             color: const Color(0xFF10B981),
                             isDark: widget.isDark,
@@ -931,8 +877,7 @@ class _SidebarProfileCardState extends State<_SidebarProfileCard> {
                           ),
                           _StatChip(
                             label: 'Certs',
-                            value:
-                                '${user.stats.certificatesCount}',
+                            value: '${user.stats.certificatesCount}',
                             icon: Icons.workspace_premium_rounded,
                             color: const Color(0xFFF59E0B),
                             isDark: widget.isDark,

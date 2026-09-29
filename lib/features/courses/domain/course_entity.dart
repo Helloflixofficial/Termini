@@ -2,10 +2,7 @@ class CategoryEntity {
   final String id;
   final String name;
 
-  const CategoryEntity({
-    required this.id,
-    required this.name,
-  });
+  const CategoryEntity({required this.id, required this.name});
 
   factory CategoryEntity.fromJson(Map<String, dynamic> json) {
     return CategoryEntity(
@@ -40,11 +37,11 @@ class AttachmentEntity {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'url': url,
-        'courseId': courseId,
-      };
+    'id': id,
+    'name': name,
+    'url': url,
+    'courseId': courseId,
+  };
 }
 
 class ChapterEntity {
@@ -80,7 +77,8 @@ class ChapterEntity {
 
     bool completed = false;
     if (json['userProgress'] != null) {
-      if (json['userProgress'] is List && (json['userProgress'] as List).isNotEmpty) {
+      if (json['userProgress'] is List &&
+          (json['userProgress'] as List).isNotEmpty) {
         completed = json['userProgress'][0]['isCompleted'] == true;
       } else if (json['userProgress'] is Map) {
         completed = json['userProgress']['isCompleted'] == true;
@@ -102,17 +100,17 @@ class ChapterEntity {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'description': description,
-        'videoUrl': videoUrl,
-        'position': position,
-        'isPublished': isPublished,
-        'isFree': isFree,
-        'courseId': courseId,
-        'muxPlaybackId': muxPlaybackId,
-        'isCompleted': isCompleted,
-      };
+    'id': id,
+    'title': title,
+    'description': description,
+    'videoUrl': videoUrl,
+    'position': position,
+    'isPublished': isPublished,
+    'isFree': isFree,
+    'courseId': courseId,
+    'muxPlaybackId': muxPlaybackId,
+    'isCompleted': isCompleted,
+  };
 
   ChapterEntity copyWith({
     String? id,
@@ -220,24 +218,24 @@ class CourseEntity {
       progress: prog,
       chapters: chapList,
       attachments: attList,
-      isPurchased: purchased,
+      isPurchased: json['isPurchased'] as bool? ?? purchased,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'userId': userId,
-        'title': title,
-        'description': description,
-        'imageUrl': imageUrl,
-        'price': price,
-        'isPublished': isPublished,
-        'categoryId': categoryId,
-        'category': category?.toJson(),
-        'chaptersCount': chaptersCount,
-        'progress': progress,
-        'chapters': chapters.map((c) => c.toJson()).toList(),
-        'attachments': attachments.map((a) => a.toJson()).toList(),
-        'isPurchased': isPurchased,
-      };
+    'id': id,
+    'userId': userId,
+    'title': title,
+    'description': description,
+    'imageUrl': imageUrl,
+    'price': price,
+    'isPublished': isPublished,
+    'categoryId': categoryId,
+    'category': category?.toJson(),
+    'chaptersCount': chaptersCount,
+    'progress': progress,
+    'chapters': chapters.map((c) => c.toJson()).toList(),
+    'attachments': attachments.map((a) => a.toJson()).toList(),
+    'isPurchased': isPurchased,
+  };
 }

@@ -2,6 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import 'dart:convert';
+
 import '../config/env.dart';
 import '../error/failures.dart';
 
@@ -25,6 +28,16 @@ class AuthInterceptor extends Interceptor {
     if (token != null && token.isNotEmpty) {
       options.headers['Authorization'] = 'Bearer $token';
     }
+    final userData = await _storage.read(key: 'auth_user_data');
+    if (userData != null) {
+      try {
+        final userId =
+            (jsonDecode(userData) as Map<String, dynamic>)['id'] as String?;
+        if (userId != null && userId.isNotEmpty) {
+          options.headers['X-User-Id'] = userId;
+        }
+      } catch (_) {}
+    }
     options.headers['Accept'] = 'application/json';
     options.headers['Content-Type'] = 'application/json';
     return handler.next(options);
@@ -33,7 +46,9 @@ class AuthInterceptor extends Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
     if (kDebugMode) {
-      debugPrint('[API Error] ${err.requestOptions.method} ${err.requestOptions.uri}');
+      debugPrint(
+        '[API Error] ${err.requestOptions.method} ${err.requestOptions.uri}',
+      );
       debugPrint('[Status] ${err.response?.statusCode}: ${err.response?.data}');
     }
     return handler.next(err);
@@ -48,13 +63,17 @@ class NetworkFallbackInterceptor extends Interceptor {
   NetworkFallbackInterceptor(this._dio);
 
   @override
-  Future<void> onError(DioException err, ErrorInterceptorHandler handler) async {
+  Future<void> onError(
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
     if (err.type == DioExceptionType.connectionError ||
         err.type == DioExceptionType.connectionTimeout) {
       final isPrimary = _dio.options.baseUrl.contains('127.0.0.1');
       final alternateHost = isPrimary ? _fallbackUrl : _primaryUrl;
 
-      final alreadyRetried = err.requestOptions.extra['retried_fallback'] == true;
+      final alreadyRetried =
+          err.requestOptions.extra['retried_fallback'] == true;
       if (!alreadyRetried) {
         try {
           err.requestOptions.extra['retried_fallback'] = true;
@@ -130,7 +149,10 @@ Failure handleDioError(DioException error) {
     final msg = error.response?.data?.toString() ?? 'Client error';
     return ServerFailure(msg, statusCode: statusCode);
   } else if (statusCode != null && statusCode >= 500) {
-    return ServerFailure('Server error. Please try again.', statusCode: statusCode);
+    return ServerFailure(
+      'Server error. Please try again.',
+      statusCode: statusCode,
+    );
   }
 
   return UnexpectedFailure(error.message ?? 'Unknown error');

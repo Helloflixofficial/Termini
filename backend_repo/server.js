@@ -2,6 +2,7 @@ const http = require('http');
 const url = require('url');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 
@@ -124,6 +125,68 @@ async function loadCoursesFromDB(filterUserId = null, publishedOnly = false) {
 async function loadCategoriesFromDB() {
   const rows = await dbQuery('SELECT * FROM "Category" ORDER BY "name" ASC');
   return rows.map(r => ({ id: r.id, name: r.name }));
+}
+
+function getCommunityOwnerId() {
+  return (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',')[0].trim();
+}
+
+async function loadCommunitySpacesFromDB() {
+  const ownerId = getCommunityOwnerId();
+  if (!ownerId) throw new Error('Community owner is not configured');
+
+  return dbQuery(
+    `SELECT "id", "name", "slug", "description", "color"
+     FROM "CommunitySpace"
+     WHERE "ownerId" = $1
+     ORDER BY "createdAt" ASC`,
+    [ownerId],
+  );
+}
+
+async function loadCommunityPostsFromDB(spaceId, userId) {
+  const ownerId = getCommunityOwnerId();
+  if (!ownerId) throw new Error('Community owner is not configured');
+
+  const params = [ownerId];
+  let spaceFilter = '';
+  if (spaceId) {
+    params.push(spaceId);
+    spaceFilter = `AND p."spaceId" = $${params.length}`;
+  }
+  const userParam = userId ? (params.push(userId), `$${params.length}`) : 'NULL';
+
+  return dbQuery(
+    `SELECT
+       p."id", p."title", p."content", p."authorId", p."ownerId", p."spaceId",
+       p."isPinned", p."isAnnouncement", p."isApproved", p."createdAt",
+       p."mediaUrl", p."mediaType", p."linkUrl", p."linkTitle",
+       p."authorName", p."authorImageUrl",
+       COALESCE(l."likesCount", 0)::int AS "likesCount",
+       COALESCE(l."isLikedByMe", false) AS "isLikedByMe",
+       json_build_object('id', s."id", 'name', s."name", 'color', s."color") AS "space",
+       COALESCE(
+         json_agg(json_build_object(
+           'id', c."id", 'content', c."content", 'authorId', c."authorId",
+           'postId', c."postId", 'createdAt', c."createdAt",
+           'authorName', c."authorName", 'authorImageUrl', c."authorImageUrl"
+         ) ORDER BY c."createdAt" ASC) FILTER (WHERE c."id" IS NOT NULL),
+         '[]'::json
+       ) AS "comments"
+     FROM "CommunityPost" p
+     JOIN "CommunitySpace" s ON s."id" = p."spaceId"
+     LEFT JOIN "CommunityComment" c ON c."postId" = p."id"
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*) AS "likesCount",
+              BOOL_OR("userId" = ${userParam}) AS "isLikedByMe"
+       FROM "CommunityLike" WHERE "postId" = p."id"
+     ) l ON true
+     WHERE p."ownerId" = $1 ${spaceFilter}
+     GROUP BY p."id", s."id", l."likesCount", l."isLikedByMe"
+     ORDER BY p."isPinned" DESC, p."createdAt" DESC
+     LIMIT 100`,
+    params,
+  );
 }
 
 // In-memory fallback for users (not in Neon LMS schema)
@@ -355,6 +418,10 @@ const liveSessions = [
 
 // Auth & User Extraction Helper
 function extractUserId(req) {
+  const profileUserId = req.headers['x-user-id'];
+  if (typeof profileUserId === 'string' && profileUserId.trim()) {
+    return profileUserId.trim();
+  }
   const authHeader = req.headers['authorization'] || '';
   if (authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7).trim();
@@ -369,6 +436,38 @@ function extractUserId(req) {
     return token;
   }
   return 'student_learner_demo'; // default dev user
+}
+
+async function addCoursePurchaseState(courses, userId) {
+  if (!courses.length) return [];
+  const courseIds = courses.map(course => course.id);
+  const purchases = await dbQuery(
+    `SELECT "id", "courseId" FROM "Purchase"
+     WHERE "userId" = $1 AND "courseId" = ANY($2::text[])`,
+    [userId, courseIds],
+  );
+  const purchaseByCourse = new Map(purchases.map(purchase => [purchase.courseId, purchase]));
+  const enrolledCourses = courses.filter(course => purchaseByCourse.has(course.id));
+  const chapterIds = enrolledCourses.flatMap(course =>
+    (course.chapters || []).filter(chapter => chapter.isPublished).map(chapter => chapter.id),
+  );
+  const completed = chapterIds.length
+    ? await dbQuery(
+        `SELECT "chapterId" FROM "UserProgress"
+         WHERE "userId" = $1 AND "isCompleted" = true AND "chapterId" = ANY($2::text[])`,
+        [userId, chapterIds],
+      )
+    : [];
+  const completedIds = new Set(completed.map(row => row.chapterId));
+
+  return courses.map(course => {
+    const purchase = purchaseByCourse.get(course.id);
+    if (!purchase) return { ...course, isPurchased: false, purchases: [], progress: null };
+    const chapters = (course.chapters || []).filter(chapter => chapter.isPublished);
+    const completedCount = chapters.filter(chapter => completedIds.has(chapter.id)).length;
+    const progress = chapters.length ? Math.round((completedCount / chapters.length) * 100) : 0;
+    return { ...course, isPurchased: true, purchases: [purchase], progress };
+  });
 }
 
 // CORS & Response Helpers
@@ -551,13 +650,13 @@ const server = http.createServer(async (req, res) => {
     if (!user) {
       user = {
         id: userId,
-        email: userId.includes('@') ? userId : `${userId}@oeplatform.dev`,
-        firstName: userId.startsWith('teacher') ? 'Alex' : 'Jordan',
-        lastName: userId.startsWith('teacher') ? 'Instructor' : 'Learner',
-        bio: 'Passionate student exploring cross-platform mobile development and cloud systems.',
+        email: userId.includes('@') ? userId : '',
+        firstName: userId.startsWith('teacher') ? 'Alex' : '',
+        lastName: userId.startsWith('teacher') ? 'Instructor' : '',
+        bio: '',
         imageUrl: userId.startsWith('teacher')
           ? 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=256&q=80'
-          : 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=256&q=80',
+          : null,
         isTeacher: userId.startsWith('teacher'),
         joinedDate: 'January 2026',
       };
@@ -617,10 +716,8 @@ const server = http.createServer(async (req, res) => {
       const completedCourses = [];
       const coursesInProgress = [];
 
-      // If user has no purchases, show all published courses as "in progress" with 0%
-      const coursesToShow = purchasedCourseIds.size > 0
-        ? allCourses.filter(c => purchasedCourseIds.has(c.id))
-        : allCourses;
+      // The dashboard represents enrolled courses only.
+      const coursesToShow = allCourses.filter(c => purchasedCourseIds.has(c.id));
 
       for (const course of coursesToShow) {
         const totalChapters = course.chapters ? course.chapters.length : 0;
@@ -631,7 +728,7 @@ const server = http.createServer(async (req, res) => {
           }
         }
         const progress = totalChapters > 0 ? (completedChapterCount / totalChapters) * 100 : 0;
-        const courseWithProgress = { ...course, progress: Math.round(progress) };
+        const courseWithProgress = { ...course, isPurchased: true, progress: Math.round(progress) };
         if (progress >= 100) {
           completedCourses.push(courseWithProgress);
         } else {
@@ -661,10 +758,13 @@ const server = http.createServer(async (req, res) => {
     try {
       const qTitle = (parsedUrl.query.title || '').toLowerCase();
       const qCategoryId = parsedUrl.query.categoryId || '';
-      let allCourses = await loadCoursesFromDB(null, true);
+      let allCourses = await addCoursePurchaseState(
+        await loadCoursesFromDB(null, true),
+        userId,
+      );
       if (qTitle) allCourses = allCourses.filter(c => c.title.toLowerCase().includes(qTitle));
       if (qCategoryId) allCourses = allCourses.filter(c => c.categoryId === qCategoryId);
-      return sendJson(res, 200, allCourses.map(c => ({ ...c, progress: 0 })));
+      return sendJson(res, 200, allCourses);
     } catch (e) {
       console.error('[Courses] DB error:', e.message);
       return sendJson(res, 500, { error: e.message });
@@ -697,10 +797,10 @@ const server = http.createServer(async (req, res) => {
   if (singleCourseMatch && method === 'GET') {
     const courseId = singleCourseMatch[1];
     try {
-      const allCourses = await loadCoursesFromDB();
+      const allCourses = await addCoursePurchaseState(await loadCoursesFromDB(), userId);
       const course = allCourses.find(c => c.id === courseId);
       if (!course) return sendJson(res, 404, { error: 'Course not found' });
-      return sendJson(res, 200, { ...course, progress: 0 });
+      return sendJson(res, 200, course);
     } catch (e) {
       return sendJson(res, 500, { error: e.message });
     }
@@ -735,7 +835,13 @@ const server = http.createServer(async (req, res) => {
         chapter,
         muxData: chapter.muxData,
         purchase: hasPurchased ? { id: purchaseRows[0].id, userId, courseId } : null,
-        attachments: [],
+        attachments: hasPurchased
+          ? await dbQuery(
+              `SELECT "id", "name", "url", "courseId" FROM "Attachment"
+               WHERE "courseId" = $1 ORDER BY "createdAt" ASC`,
+              [courseId],
+            )
+          : [],
         nextChapter: null,
         userProgress: { id: `prog-${chapterId}`, userId, chapterId, isCompleted },
       });
@@ -813,31 +919,187 @@ const server = http.createServer(async (req, res) => {
 
   // 14. Community Spaces (GET /api/community/spaces)
   if (pathname === '/api/community/spaces' && method === 'GET') {
-    return sendJson(res, 200, communitySpaces);
+    try {
+      return sendJson(res, 200, await loadCommunitySpacesFromDB());
+    } catch (e) {
+      console.error('[Community Spaces] DB error:', e.message);
+      return sendJson(res, 500, { error: 'Unable to load community spaces' });
+    }
+  }
+
+  // Community comments and likes are stored in Neon for the configured community.
+  const communityCommentsMatch = pathname.match(/^\/api\/community\/posts\/([^/]+)\/comments$/);
+  if (communityCommentsMatch && (method === 'GET' || method === 'POST')) {
+    const postId = decodeURIComponent(communityCommentsMatch[1]);
+    const ownerId = getCommunityOwnerId();
+    try {
+      const post = await dbQuery(
+        'SELECT "id" FROM "CommunityPost" WHERE "id" = $1 AND "ownerId" = $2',
+        [postId, ownerId],
+      );
+      if (!post.length) return sendJson(res, 404, { error: 'Community post not found' });
+
+      if (method === 'GET') {
+        const comments = await dbQuery(
+          `SELECT "id", "content", "authorId", "authorName", "authorImageUrl", "postId", "createdAt"
+           FROM "CommunityComment" WHERE "postId" = $1 ORDER BY "createdAt" ASC`,
+          [postId],
+        );
+        return sendJson(res, 200, comments);
+      }
+
+      const body = await parseBody(req);
+      const content = String(body.content || '').trim();
+      if (!content) return sendJson(res, 400, { error: 'Comment content is required' });
+      const authorId = body.authorId || userId;
+      const rows = await dbQuery(
+        `INSERT INTO "CommunityComment"
+           ("id", "content", "authorId", "authorName", "authorImageUrl", "postId", "createdAt")
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         RETURNING "id", "content", "authorId", "authorName", "authorImageUrl", "postId", "createdAt"`,
+        [crypto.randomUUID(), content, authorId, body.authorName || null, body.authorImageUrl || null, postId],
+      );
+      return sendJson(res, 201, rows[0]);
+    } catch (e) {
+      console.error('[Community Comments] DB error:', e.message);
+      return sendJson(res, 500, { error: 'Unable to load or save community comment' });
+    }
+  }
+
+  const communityLikesMatch = pathname.match(/^\/api\/community\/posts\/([^/]+)\/likes$/);
+  if (communityLikesMatch && method === 'POST') {
+    const postId = decodeURIComponent(communityLikesMatch[1]);
+    const ownerId = getCommunityOwnerId();
+    const body = await parseBody(req);
+    const likedByUserId = body.userId || userId;
+    try {
+      const post = await dbQuery(
+        'SELECT "id" FROM "CommunityPost" WHERE "id" = $1 AND "ownerId" = $2',
+        [postId, ownerId],
+      );
+      if (!post.length) return sendJson(res, 404, { error: 'Community post not found' });
+
+      const existing = await dbQuery(
+        'SELECT "id" FROM "CommunityLike" WHERE "postId" = $1 AND "userId" = $2',
+        [postId, likedByUserId],
+      );
+      if (existing.length) {
+        await dbQuery('DELETE FROM "CommunityLike" WHERE "postId" = $1 AND "userId" = $2', [postId, likedByUserId]);
+      } else {
+        await dbQuery(
+          `INSERT INTO "CommunityLike" ("id", "userId", "ownerId", "postId", "createdAt")
+           VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT ("userId", "postId") DO NOTHING`,
+          [crypto.randomUUID(), likedByUserId, ownerId, postId],
+        );
+      }
+      const rows = await dbQuery(
+        `SELECT COUNT(*)::int AS "likesCount",
+                BOOL_OR("userId" = $2) AS "isLikedByMe"
+         FROM "CommunityLike" WHERE "postId" = $1`,
+        [postId, likedByUserId],
+      );
+      return sendJson(res, 200, {
+        likesCount: rows[0].likesCount,
+        isLikedByMe: rows[0].isLikedByMe || false,
+      });
+    } catch (e) {
+      console.error('[Community Likes] DB error:', e.message);
+      return sendJson(res, 500, { error: 'Unable to update community like' });
+    }
   }
 
   // 15. Community Posts (GET & POST /api/community/posts)
+  if (pathname === '/api/community/notifications' && method === 'GET') {
+    const ownerId = getCommunityOwnerId();
+    const requestedUserId = typeof parsedUrl.query.userId === 'string'
+      ? parsedUrl.query.userId
+      : userId;
+    try {
+      const notifications = await dbQuery(
+        `SELECT p."id", p."title", p."content", p."authorId", p."ownerId", p."spaceId",
+                p."isPinned", p."isAnnouncement", p."isApproved", p."createdAt",
+                p."authorName", p."authorImageUrl",
+                0::int AS "likesCount", false AS "isLikedByMe",
+                '[]'::json AS "comments", 0::int AS "commentsCount"
+         FROM "CommunityPost" p
+         WHERE p."ownerId" = $1 AND p."isApproved" = true AND p."authorId" <> $2
+         ORDER BY p."createdAt" DESC
+         LIMIT 100`,
+        [ownerId, requestedUserId],
+      );
+      return sendJson(res, 200, notifications);
+    } catch (e) {
+      console.error('[Community Notifications] DB error:', e.message);
+      return sendJson(res, 500, { error: 'Unable to load community notifications' });
+    }
+  }
+
   if (pathname === '/api/community/posts' && method === 'GET') {
-    return sendJson(res, 200, communityPosts);
+    try {
+      const spaceId = typeof parsedUrl.query.spaceId === 'string'
+        ? parsedUrl.query.spaceId
+        : null;
+      const requestedUserId = typeof parsedUrl.query.userId === 'string'
+        ? parsedUrl.query.userId
+        : userId;
+      return sendJson(res, 200, await loadCommunityPostsFromDB(spaceId, requestedUserId));
+    } catch (e) {
+      console.error('[Community Posts] DB error:', e.message);
+      return sendJson(res, 500, { error: 'Unable to load community posts' });
+    }
   }
 
   if (pathname === '/api/community/posts' && method === 'POST') {
     const body = await parseBody(req);
+    const ownerId = getCommunityOwnerId();
+    const spaceId = String(body.spaceId || '');
+    const title = String(body.title || '').trim();
+    const content = String(body.content || '').trim();
     const author = users[userId] || { firstName: 'Student', imageUrl: null };
-    const newPost = {
-      id: `post-${Date.now()}`,
-      spaceId: body.spaceId || communitySpaces[0].id,
-      userId: userId,
-      authorName: `${author.firstName || ''} ${author.lastName || ''}`.trim() || 'Learner',
-      authorImageUrl: author.imageUrl,
-      title: body.title || 'Untitled Discussion',
-      content: body.content || '',
-      createdAt: new Date().toISOString(),
-      likesCount: 0,
-      comments: [],
-    };
-    communityPosts.unshift(newPost);
-    return sendJson(res, 200, newPost);
+    const isTeacher = Boolean(author.isTeacher) ||
+      (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim()).includes(userId);
+
+    if (!ownerId) return sendJson(res, 500, { error: 'Community owner is not configured' });
+    if (!spaceId || !title || !content) {
+      return sendJson(res, 400, { error: 'Space, title, and post content are required' });
+    }
+
+    try {
+      const spaces = await dbQuery(
+        'SELECT "id" FROM "CommunitySpace" WHERE "id" = $1 AND "ownerId" = $2',
+        [spaceId, ownerId],
+      );
+      if (!spaces.length) return sendJson(res, 404, { error: 'Community space not found' });
+
+      const settings = await dbQuery(
+        'SELECT "allowStudentPosts", "requirePostApproval" FROM "CommunitySettings" WHERE "ownerId" = $1 LIMIT 1',
+        [ownerId],
+      );
+      const communitySettings = settings[0] || { allowStudentPosts: true, requirePostApproval: false };
+      if (!isTeacher && !communitySettings.allowStudentPosts) {
+        return sendJson(res, 403, { error: 'Student posts are disabled for this community' });
+      }
+
+      const isApproved = isTeacher || !communitySettings.requirePostApproval;
+      const authorName = String(body.authorName || `${author.firstName || ''} ${author.lastName || ''}`.trim() || 'Learner');
+      const rows = await dbQuery(
+        `INSERT INTO "CommunityPost"
+           ("id", "title", "content", "authorId", "ownerId", "spaceId", "isApproved", "createdAt", "updatedAt", "authorName", "authorImageUrl")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), $8, $9)
+         RETURNING "id", "title", "content", "authorId", "ownerId", "spaceId", "isPinned", "isAnnouncement", "isApproved", "createdAt", "authorName", "authorImageUrl"`,
+        [crypto.randomUUID(), title, content, userId, ownerId, spaceId, isApproved, authorName, body.authorImageUrl || author.imageUrl || null],
+      );
+      return sendJson(res, 201, {
+        ...rows[0],
+        likesCount: 0,
+        isLikedByMe: false,
+        comments: [],
+        commentsCount: 0,
+      });
+    } catch (e) {
+      console.error('[Community Posts] DB error while creating post:', e.message);
+      return sendJson(res, 500, { error: 'Unable to create community post' });
+    }
   }
 
   // 16. LiveKit Meetings (GET /api/livekit/sessions, POST /api/livekit/token)

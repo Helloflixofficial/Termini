@@ -92,22 +92,43 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<UserEntity> fetchUserProfile() async {
+    final token = await _storage.read(key: _kSessionToken);
+    final jsonStr = await _storage.read(key: _kUserData);
+    UserEntity? cachedUser;
+    if (jsonStr != null) {
+      try {
+        cachedUser = UserEntity.fromJson(jsonDecode(jsonStr) as Map<String, dynamic>);
+      } catch (_) {}
+    }
+
+    final isClerkSession = token?.startsWith('clerk_session_') == true ||
+        (cachedUser != null && !cachedUser.id.startsWith('demo_'));
+
     try {
       final res = await _dio.get(ApiConstants.userProfile);
       final data = res.data as Map<String, dynamic>;
-      final user = UserEntity.fromJson(data);
-      final finalUser = user.copyWith(isTeacher: _isTeacherId(user.id) || user.isTeacher);
+      final backendUser = UserEntity.fromJson(data);
+
+      if (isClerkSession && cachedUser != null) {
+        // Keep Clerk user's identity: name, email, avatar, etc.
+        // Only merge backend stats (enrolled courses, hours, etc.)
+        final merged = cachedUser.copyWith(
+          stats: backendUser.stats,
+        );
+        await _storage.write(key: _kUserData, value: jsonEncode(merged.toJson()));
+        return merged;
+      }
+
+      final finalUser = backendUser.copyWith(
+        isTeacher: _isTeacherId(backendUser.id) || backendUser.isTeacher,
+      );
       await _storage.write(key: _kUserData, value: jsonEncode(finalUser.toJson()));
       return finalUser;
     } on DioException catch (e) {
+      if (cachedUser != null) return cachedUser;
       throw handleDioError(e);
     } catch (e) {
-      // If fetching fails, check cached
-      final jsonStr = await _storage.read(key: _kUserData);
-      if (jsonStr != null) {
-        final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-        return UserEntity.fromJson(map);
-      }
+      if (cachedUser != null) return cachedUser;
       rethrow;
     }
   }

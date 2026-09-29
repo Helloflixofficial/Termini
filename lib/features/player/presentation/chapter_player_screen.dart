@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/theme_provider.dart';
 import '../../../core/utils/breakpoints.dart';
@@ -12,17 +13,19 @@ import '../../courses/domain/course_entity.dart';
 import 'widgets/mux_video_player.dart';
 
 final chapterDetailsProvider = FutureProvider.autoDispose
-    .family<Map<String, dynamic>, ({String courseId, String chapterId})>(
-        (ref, arg) async {
-  final repo = ref.watch(courseRepositoryProvider);
-  return repo.getChapterDetails(arg.courseId, arg.chapterId);
-});
+    .family<Map<String, dynamic>, ({String courseId, String chapterId})>((
+      ref,
+      arg,
+    ) async {
+      final repo = ref.watch(courseRepositoryProvider);
+      return repo.getChapterDetails(arg.courseId, arg.chapterId);
+    });
 
-final courseDetailsProvider =
-    FutureProvider.autoDispose.family<CourseEntity, String>((ref, courseId) async {
-  final repo = ref.watch(courseRepositoryProvider);
-  return repo.getCourseDetails(courseId);
-});
+final courseDetailsProvider = FutureProvider.autoDispose
+    .family<CourseEntity, String>((ref, courseId) async {
+      final repo = ref.watch(courseRepositoryProvider);
+      return repo.getCourseDetails(courseId);
+    });
 
 class ChapterPlayerScreen extends ConsumerStatefulWidget {
   final String courseId;
@@ -35,7 +38,8 @@ class ChapterPlayerScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ChapterPlayerScreen> createState() => _ChapterPlayerScreenState();
+  ConsumerState<ChapterPlayerScreen> createState() =>
+      _ChapterPlayerScreenState();
 }
 
 class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
@@ -51,15 +55,21 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
         widget.chapterId,
         !currentCompleted,
       );
-      ref.invalidate(chapterDetailsProvider((
-        courseId: widget.courseId,
-        chapterId: widget.chapterId,
-      )));
+      ref.invalidate(
+        chapterDetailsProvider((
+          courseId: widget.courseId,
+          chapterId: widget.chapterId,
+        )),
+      );
       ref.invalidate(courseDetailsProvider(widget.courseId));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(!currentCompleted ? 'Chapter marked as completed!' : 'Progress updated.'),
+            content: Text(
+              !currentCompleted
+                  ? 'Chapter marked as completed!'
+                  : 'Progress updated.',
+            ),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -91,9 +101,8 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Checkout failed: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Checkout failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isCheckingOut = false);
@@ -106,10 +115,12 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
     final colorScheme = theme.colorScheme;
     final isCompact = Breakpoints.isCompact(context);
 
-    final chapterAsync = ref.watch(chapterDetailsProvider((
-      courseId: widget.courseId,
-      chapterId: widget.chapterId,
-    )));
+    final chapterAsync = ref.watch(
+      chapterDetailsProvider((
+        courseId: widget.courseId,
+        chapterId: widget.chapterId,
+      )),
+    );
 
     final courseAsync = ref.watch(courseDetailsProvider(widget.courseId));
 
@@ -117,7 +128,9 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.canPop() ? context.pop() : context.go('/course/${widget.courseId}'),
+          onPressed: () => context.canPop()
+              ? context.pop()
+              : context.go('/course/${widget.courseId}'),
         ),
         title: courseAsync.maybeWhen(
           data: (course) => Text(
@@ -153,10 +166,12 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => ErrorStateWidget(
           message: err.toString(),
-          onRetry: () => ref.invalidate(chapterDetailsProvider((
-            courseId: widget.courseId,
-            chapterId: widget.chapterId,
-          ))),
+          onRetry: () => ref.invalidate(
+            chapterDetailsProvider((
+              courseId: widget.courseId,
+              chapterId: widget.chapterId,
+            )),
+          ),
         ),
         data: (data) {
           final chapter = data['chapter'] != null
@@ -172,7 +187,9 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
 
           final muxPlaybackId = data['muxData']?['playbackId'] as String?;
           final nextChapter = data['nextChapter'] != null
-              ? ChapterEntity.fromJson(data['nextChapter'] as Map<String, dynamic>)
+              ? ChapterEntity.fromJson(
+                  data['nextChapter'] as Map<String, dynamic>,
+                )
               : null;
 
           final isCompleted = data['userProgress']?['isCompleted'] == true;
@@ -194,7 +211,10 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Video Player or Lock Banner
-                if (hasAccess && ((muxPlaybackId != null && muxPlaybackId.isNotEmpty) || (chapter.videoUrl != null && chapter.videoUrl!.isNotEmpty)))
+                if (hasAccess &&
+                    ((muxPlaybackId != null && muxPlaybackId.isNotEmpty) ||
+                        (chapter.videoUrl != null &&
+                            chapter.videoUrl!.isNotEmpty)))
                   MuxVideoPlayer(
                     chapterId: chapter.id,
                     playbackId: muxPlaybackId,
@@ -211,7 +231,11 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.video_camera_back_outlined, size: 48, color: Colors.white54),
+                        const Icon(
+                          Icons.video_camera_back_outlined,
+                          size: 48,
+                          color: Colors.white54,
+                        ),
                         const SizedBox(height: 12),
                         const Text(
                           'No video uploaded for this chapter yet.',
@@ -237,7 +261,11 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                               color: colorScheme.primary.withValues(alpha: 0.1),
                               shape: BoxShape.circle,
                             ),
-                            child: Icon(Icons.lock_rounded, size: 36, color: colorScheme.primary),
+                            child: Icon(
+                              Icons.lock_rounded,
+                              size: 36,
+                              color: colorScheme.primary,
+                            ),
                           ),
                           const SizedBox(height: 16),
                           Text(
@@ -256,12 +284,18 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                           ),
                           const SizedBox(height: 20),
                           ElevatedButton.icon(
-                            icon: const Icon(Icons.shopping_bag_outlined, size: 18),
+                            icon: const Icon(
+                              Icons.shopping_bag_outlined,
+                              size: 18,
+                            ),
                             label: _isCheckingOut
                                 ? const SizedBox(
                                     height: 16,
                                     width: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
                                   )
                                 : Text(
                                     course?.price != null
@@ -280,10 +314,17 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                   Container(
                     width: double.infinity,
                     color: AppColors.brandAmber.withValues(alpha: 0.15),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                     child: Row(
                       children: [
-                        const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.brandAmber),
+                        const Icon(
+                          Icons.info_outline_rounded,
+                          size: 18,
+                          color: AppColors.brandAmber,
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           'This is a free preview chapter of this course.',
@@ -335,12 +376,16 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                                     ? Icons.check_circle_rounded
                                     : Icons.circle_outlined,
                                 size: 18,
-                                color: isCompleted ? AppColors.brandEmerald : null,
+                                color: isCompleted
+                                    ? AppColors.brandEmerald
+                                    : null,
                               ),
                               label: Text(
                                 isCompleted ? 'Completed' : 'Mark as complete',
                                 style: TextStyle(
-                                  color: isCompleted ? AppColors.brandEmerald : null,
+                                  color: isCompleted
+                                      ? AppColors.brandEmerald
+                                      : null,
                                 ),
                               ),
                               onPressed: _isTogglingProgress
@@ -349,12 +394,16 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                             ),
                           ] else ...[
                             ElevatedButton(
-                              onPressed: _isCheckingOut ? null : _handleCheckout,
+                              onPressed: _isCheckingOut
+                                  ? null
+                                  : _handleCheckout,
                               child: _isCheckingOut
                                   ? const SizedBox(
                                       height: 16,
                                       width: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     )
                                   : Text(
                                       course?.price != null
@@ -382,7 +431,8 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                       const SizedBox(height: 16),
 
                       // Description Markdown
-                      if (chapter.description != null && chapter.description!.isNotEmpty) ...[
+                      if (chapter.description != null &&
+                          chapter.description!.isNotEmpty) ...[
                         Text(
                           'About this chapter',
                           style: theme.textTheme.titleSmall?.copyWith(
@@ -392,46 +442,176 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                         const SizedBox(height: 10),
                         MarkdownBody(
                           data: chapter.description!,
-                          styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
-                            p: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
-                          ),
+                          styleSheet: MarkdownStyleSheet.fromTheme(theme)
+                              .copyWith(
+                                p: theme.textTheme.bodyMedium?.copyWith(
+                                  height: 1.6,
+                                ),
+                              ),
                         ),
                         const SizedBox(height: 24),
                       ],
 
                       // Course Attachments
                       if (attachments.isNotEmpty) ...[
-                        Text(
-                          'Resources & Attachments',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: colorScheme.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: colorScheme.outline),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.folder_open_rounded,
+                                    color: colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Files & documents',
+                                          style: theme.textTheme.titleSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                        ),
+                                        Text(
+                                          '${attachments.length} course ${attachments.length == 1 ? 'resource' : 'resources'}',
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              ...attachments.map((att) {
+                                final extension = att.name.contains('.')
+                                    ? att.name.split('.').last.toLowerCase()
+                                    : '';
+                                final isSource = const {
+                                  'zip',
+                                  'rar',
+                                  '7z',
+                                  'tar',
+                                  'gz',
+                                  'js',
+                                  'jsx',
+                                  'ts',
+                                  'tsx',
+                                  'py',
+                                  'java',
+                                  'c',
+                                  'cpp',
+                                  'html',
+                                  'css',
+                                  'json',
+                                  'md',
+                                }.contains(extension);
+                                final isVideo = const {
+                                  'mp4',
+                                  'mov',
+                                  'm4v',
+                                  'webm',
+                                  'mkv',
+                                  'avi',
+                                }.contains(extension);
+                                final fileType = switch (extension) {
+                                  'mp4' ||
+                                  'mov' ||
+                                  'm4v' ||
+                                  'webm' ||
+                                  'mkv' ||
+                                  'avi' => 'Video file',
+                                  'pdf' => 'PDF document',
+                                  'doc' || 'docx' => 'Word document',
+                                  'ppt' || 'pptx' => 'Presentation',
+                                  'xls' || 'xlsx' || 'csv' => 'Spreadsheet',
+                                  'zip' || 'rar' || '7z' => 'Archive',
+                                  _ when isSource => 'Source code',
+                                  _ => 'Course resource',
+                                };
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  child: Material(
+                                    color: colorScheme.surfaceContainerHighest
+                                        .withValues(alpha: 0.35),
+                                    borderRadius: BorderRadius.circular(11),
+                                    child: ListTile(
+                                      onTap: () async {
+                                        final uri = Uri.parse(att.url);
+                                        if (await canLaunchUrl(uri)) {
+                                          await launchUrl(
+                                            uri,
+                                            mode:
+                                                LaunchMode.externalApplication,
+                                          );
+                                        }
+                                      },
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 3,
+                                          ),
+                                      leading: Container(
+                                        width: 40,
+                                        height: 40,
+                                        decoration: BoxDecoration(
+                                          color: colorScheme.primary.withValues(
+                                            alpha: 0.1,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          isVideo
+                                              ? Icons.video_file_outlined
+                                              : isSource
+                                              ? Icons.code_rounded
+                                              : Icons.description_outlined,
+                                          color: colorScheme.primary,
+                                          size: 20,
+                                        ),
+                                      ),
+                                      title: Text(
+                                        att.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        fileType,
+                                        style: theme.textTheme.labelSmall,
+                                      ),
+                                      trailing: Icon(
+                                        Icons.download_rounded,
+                                        color: colorScheme.primary,
+                                        size: 20,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        ...attachments.map((att) => Card(
-                              elevation: 0,
-                              margin: const EdgeInsets.only(bottom: 8),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                side: BorderSide(color: colorScheme.outline),
-                              ),
-                              child: ListTile(
-                                leading: const Icon(Icons.attachment_rounded, size: 20),
-                                title: Text(
-                                  att.name,
-                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                                ),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.download_rounded, size: 20),
-                                  onPressed: () async {
-                                    final uri = Uri.parse(att.url);
-                                    if (await canLaunchUrl(uri)) {
-                                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                    }
-                                  },
-                                ),
-                              ),
-                            )),
                       ],
                     ],
                   ),
@@ -508,7 +688,9 @@ class _CourseSidebar extends ConsumerWidget {
                         value: (course.progress! / 100).clamp(0.0, 1.0),
                         minHeight: 6,
                         backgroundColor: colorScheme.surfaceContainerHighest,
-                        valueColor: const AlwaysStoppedAnimation<Color>(AppColors.brandEmerald),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          AppColors.brandEmerald,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -534,15 +716,21 @@ class _CourseSidebar extends ConsumerWidget {
 
                   return ListTile(
                     selected: isActive,
-                    selectedTileColor: colorScheme.primary.withValues(alpha: 0.08),
+                    selectedTileColor: colorScheme.primary.withValues(
+                      alpha: 0.08,
+                    ),
                     leading: Icon(
                       ch.isCompleted
                           ? Icons.check_circle_rounded
-                          : (isLocked ? Icons.lock_outline_rounded : Icons.play_circle_outline_rounded),
+                          : (isLocked
+                                ? Icons.lock_outline_rounded
+                                : Icons.play_circle_outline_rounded),
                       size: 20,
                       color: ch.isCompleted
                           ? AppColors.brandEmerald
-                          : (isActive ? colorScheme.primary : colorScheme.onSurfaceVariant),
+                          : (isActive
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant),
                     ),
                     title: Text(
                       ch.title,
@@ -550,15 +738,22 @@ class _CourseSidebar extends ConsumerWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
-                        fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                        fontWeight: isActive
+                            ? FontWeight.bold
+                            : FontWeight.w500,
                         color: isActive ? colorScheme.primary : null,
                       ),
                     ),
                     trailing: ch.isFree && !course.isPurchased
                         ? Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: AppColors.brandAmber.withValues(alpha: 0.15),
+                              color: AppColors.brandAmber.withValues(
+                                alpha: 0.15,
+                              ),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(

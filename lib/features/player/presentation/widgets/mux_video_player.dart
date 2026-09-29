@@ -1,7 +1,6 @@
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import '../../../../core/config/env.dart';
 
 class MuxVideoPlayer extends StatefulWidget {
   final String? chapterId;
@@ -52,34 +51,23 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
       _errorMessage = null;
     });
 
-    // 1. Try local backend stream (adb reverse 127.0.0.1:3000)
-    if (widget.chapterId != null && widget.chapterId!.trim().isNotEmpty) {
-      final chId = widget.chapterId!.trim();
-      final localUrl = '${AppEnv.apiBaseUrl}/api/videos/$chId';
-      final success = await _tryInitialize(localUrl);
+    // Uploaded MP4 URLs are directly playable and are the working source for
+    // the earlier chapters. Prefer this path so a Mux playback ID is optional.
+    final uploadedVideoUrl = widget.fallbackVideoUrl?.trim();
+    if (uploadedVideoUrl != null && uploadedVideoUrl.isNotEmpty) {
+      final success = await _tryInitialize(uploadedVideoUrl);
       if (success) return;
-
-      // 1b. Try direct Wi-Fi IP fallback (192.168.1.12:3000)
-      final wifiUrl = 'http://192.168.1.12:3000/api/videos/$chId';
-      final wifiSuccess = await _tryInitialize(wifiUrl);
-      if (wifiSuccess) return;
     }
 
-    // 2. Try Mux stream if playbackId is provided
-    if (widget.playbackId != null && widget.playbackId!.trim().isNotEmpty) {
-      final muxUrl = 'https://stream.mux.com/${widget.playbackId!.trim()}.m3u8';
+    // Use Mux HLS if the direct upload is missing or cannot be played.
+    final muxPlaybackId = widget.playbackId?.trim();
+    if (muxPlaybackId != null && muxPlaybackId.isNotEmpty) {
+      final muxUrl = 'https://stream.mux.com/$muxPlaybackId.m3u8';
       final success = await _tryInitialize(muxUrl);
       if (success) return;
     }
 
-    // 3. If local stream and Mux failed, try fallbackVideoUrl (from DB / Uploadthing)
-    if (widget.fallbackVideoUrl != null && widget.fallbackVideoUrl!.trim().isNotEmpty) {
-      final fallbackUrl = widget.fallbackVideoUrl!.trim();
-      final success = await _tryInitialize(fallbackUrl);
-      if (success) return;
-    }
-
-    // 4. All sources failed or no video available
+    // Both stored video sources failed or are unavailable.
     if (mounted) {
       setState(() {
         _isLoading = false;

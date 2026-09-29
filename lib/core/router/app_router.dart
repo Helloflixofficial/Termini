@@ -5,11 +5,14 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/presentation/clerk_auth_screen.dart';
 import '../../features/community/presentation/community_screen.dart';
+import '../../features/community/presentation/community_notifications_screen.dart';
 import '../../features/community/presentation/community_settings_screen.dart';
+import '../../features/community/domain/community_entity.dart';
 import '../../features/courses/presentation/course_detail_screen.dart';
 import '../../features/courses/presentation/search_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/live/presentation/live_meet_screen.dart';
+import '../../features/live/presentation/student_meet_screen.dart';
 import '../../features/player/presentation/chapter_player_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/teacher/presentation/chapter_editor_screen.dart';
@@ -115,9 +118,28 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/community/post/:postId',
+        name: 'community-post-detail',
+        builder: (context, state) {
+          final post = state.extra;
+          if (post is CommunityPostEntity) {
+            return CommunityPostDetailScreen(post: post);
+          }
+          return Scaffold(
+            appBar: AppBar(title: const Text('Post')),
+            body: const Center(child: Text('This post is no longer available.')),
+          );
+        },
+      ),
+      GoRoute(
         path: '/community',
         name: 'community',
         builder: (context, state) => const CommunityScreen(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        name: 'notifications',
+        builder: (context, state) => const CommunityNotificationsScreen(),
       ),
       GoRoute(
         path: '/meet/:roomName',
@@ -131,6 +153,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/profile',
         name: 'profile',
         builder: (context, state) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/shortmeet',
+        name: 'shortmeet',
+        builder: (context, state) => const StudentMeetScreen(),
       ),
 
       // Teacher Routes

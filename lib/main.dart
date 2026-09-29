@@ -99,6 +99,9 @@ class _TerminiAppState extends ConsumerState<TerminiApp> {
       child: MaterialApp.router(
         title: 'Termini LMS',
         debugShowCheckedModeBanner: false,
+        builder: (context, child) => _StartupSplash(
+          child: child ?? const SizedBox.shrink(),
+        ),
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: themeMode,
@@ -112,6 +115,47 @@ class _TerminiAppState extends ConsumerState<TerminiApp> {
         ],
         supportedLocales: ClerkSdkLocalizations.supportedLocales,
       ),
+    );
+  }
+}
+
+class _StartupSplash extends StatefulWidget {
+  final Widget child;
+
+  const _StartupSplash({required this.child});
+
+  @override
+  State<_StartupSplash> createState() => _StartupSplashState();
+}
+
+class _StartupSplashState extends State<_StartupSplash> {
+  bool _visible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _visible = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        widget.child,
+        if (_visible)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Image.asset(
+                'assets/branding/termini_splash.png',
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

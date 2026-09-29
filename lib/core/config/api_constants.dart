@@ -46,7 +46,10 @@ class ApiConstants {
   static const String communitySpaces = '/api/community/spaces';
   static String communitySpace(String id) => '/api/community/spaces/$id';
   static const String communityPosts = '/api/community/posts';
+  static const String communityNotifications = '/api/community/notifications';
   static String communityPost(String id) => '/api/community/posts/$id';
+  static String communityLikes(String postId) =>
+      '/api/community/posts/$postId/likes';
   static String communityComments(String postId) =>
       '/api/community/posts/$postId/comments';
   static const String communitySettings = '/api/community/settings';

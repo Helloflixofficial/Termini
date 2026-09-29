@@ -1,7 +1,13 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+
 import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/community/data/community_local_notification_service.dart';
+import '../../features/community/presentation/community_notifications_screen.dart';
 import '../theme/theme_provider.dart';
 import '../utils/breakpoints.dart';
 
@@ -30,9 +36,9 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
     with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
-  bool _showNotifBadge = true;
+  Timer? _notificationRefreshTimer;
+  late final Future<void> _notificationSetup;
   bool _avatarHovered = false;
-  bool _notifHovered = false;
   bool _searchHovered = false;
 
   @override
@@ -44,11 +50,48 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
     );
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
+    _notificationSetup = _prepareCommunityNotifications();
+    _notificationRefreshTimer = Timer.periodic(
+      const Duration(seconds: 25),
+      (_) => _refreshCommunityNotifications(),
+    );
+  }
+
+  Future<void> _prepareCommunityNotifications() async {
+    await CommunityLocalNotificationService.initialize();
+    final user = ref.read(currentUserProvider);
+    if (user == null || user.isTeacher != false) return;
+    try {
+      final posts = await ref.read(communityNotificationPostsProvider.future);
+      await CommunityLocalNotificationService.rememberCurrentPosts(
+        user.id,
+        posts,
+      );
+    } catch (_) {
+      // A failed initial fetch is retried by the regular refresh timer.
+    }
+  }
+
+  Future<void> _refreshCommunityNotifications() async {
+    if (!mounted) return;
+    final user = ref.read(currentUserProvider);
+    if (user == null || user.isTeacher != false) return;
+    await _notificationSetup;
+    if (!mounted) return;
+    ref.invalidate(communityNotificationPostsProvider);
+    ref.invalidate(communityUnreadCountProvider);
+    try {
+      final posts = await ref.read(communityNotificationPostsProvider.future);
+      await CommunityLocalNotificationService.notifyForNewPosts(user.id, posts);
+    } catch (_) {
+      // The next timer tick retries if the backend is temporarily unavailable.
+    }
   }
 
   @override
   void dispose() {
     _animController.dispose();
+    _notificationRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -76,12 +119,15 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
     final isCompact = Breakpoints.isCompact(context);
     final currentUser = ref.watch(currentUserProvider);
     final canTeach = currentUser?.isTeacher ?? false;
+    final unreadCount = canTeach
+        ? 0
+        : ref.watch(communityUnreadCountProvider).valueOrNull ?? 0;
 
     final initials = currentUser?.firstName?.isNotEmpty == true
         ? currentUser!.firstName![0].toUpperCase()
         : (currentUser?.email.isNotEmpty == true
-            ? currentUser!.email[0].toUpperCase()
-            : 'U');
+              ? currentUser!.email[0].toUpperCase()
+              : 'U');
 
     final sidebarBg = isDark ? const Color(0xFF131720) : Colors.white;
 
@@ -194,28 +240,30 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                     decoration: BoxDecoration(
                       color: _searchHovered
                           ? (isDark
-                              ? Colors.white.withValues(alpha: 0.07)
-                              : Colors.black.withValues(alpha: 0.04))
+                                ? Colors.white.withValues(alpha: 0.07)
+                                : Colors.black.withValues(alpha: 0.04))
                           : (isDark
-                              ? Colors.white.withValues(alpha: 0.04)
-                              : Colors.black.withValues(alpha: 0.02)),
+                                ? Colors.white.withValues(alpha: 0.04)
+                                : Colors.black.withValues(alpha: 0.02)),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: _searchHovered
                             ? colorScheme.primary.withValues(alpha: 0.4)
                             : isDark
-                                ? Colors.white.withValues(alpha: 0.1)
-                                : Colors.black.withValues(alpha: 0.1),
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.black.withValues(alpha: 0.1),
                         width: 1.2,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.search_rounded,
-                            size: 17,
-                            color: _searchHovered
-                                ? colorScheme.primary
-                                : colorScheme.onSurfaceVariant),
+                        Icon(
+                          Icons.search_rounded,
+                          size: 17,
+                          color: _searchHovered
+                              ? colorScheme.primary
+                              : colorScheme.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 9),
                         Expanded(
                           child: Text(
@@ -223,14 +271,17 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w400,
-                              color: colorScheme.onSurfaceVariant
-                                  .withValues(alpha: 0.7),
+                              color: colorScheme.onSurfaceVariant.withValues(
+                                alpha: 0.7,
+                              ),
                             ),
                           ),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: isDark
                                 ? Colors.white.withValues(alpha: 0.07)
@@ -256,68 +307,6 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
             const SizedBox(width: 6),
             ...?widget.actions,
 
-            // Notification Bell
-            if (!isCompact) ...[
-              const SizedBox(width: 4),
-              MouseRegion(
-                onEnter: (_) => setState(() => _notifHovered = true),
-                onExit: (_) => setState(() => _notifHovered = false),
-                child: GestureDetector(
-                  onTap: () => setState(() => _showNotifBadge = false),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: _notifHovered
-                          ? colorScheme.primary.withValues(alpha: 0.1)
-                          : isDark
-                              ? Colors.white.withValues(alpha: 0.05)
-                              : Colors.black.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: _notifHovered
-                            ? colorScheme.primary.withValues(alpha: 0.3)
-                            : Colors.transparent,
-                      ),
-                    ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Icon(
-                          _showNotifBadge
-                              ? Icons.notifications_rounded
-                              : Icons.notifications_none_rounded,
-                          size: 20,
-                          color: _notifHovered
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                        ),
-                        if (_showNotifBadge)
-                          Positioned(
-                            top: 7,
-                            right: 7,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEF4444),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: sidebarBg,
-                                  width: 1.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-            ],
-
             // Theme toggle
             const ThemeToggleButton(),
             const SizedBox(width: 8),
@@ -330,21 +319,23 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                 onTap: () => context.go('/profile'),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: _avatarHovered
                         ? colorScheme.primary.withValues(alpha: 0.08)
                         : isDark
-                            ? Colors.white.withValues(alpha: 0.04)
-                            : Colors.black.withValues(alpha: 0.03),
+                        ? Colors.white.withValues(alpha: 0.04)
+                        : Colors.black.withValues(alpha: 0.03),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _avatarHovered
                           ? colorScheme.primary.withValues(alpha: 0.25)
                           : isDark
-                              ? Colors.white.withValues(alpha: 0.08)
-                              : Colors.black.withValues(alpha: 0.08),
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.black.withValues(alpha: 0.08),
                     ),
                   ),
                   child: Row(
@@ -375,10 +366,11 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                                   : null,
                               boxShadow: [
                                 BoxShadow(
-                                  color: (canTeach
-                                          ? const Color(0xFF8B5CF6)
-                                          : const Color(0xFF0284C7))
-                                      .withValues(alpha: 0.35),
+                                  color:
+                                      (canTeach
+                                              ? const Color(0xFF8B5CF6)
+                                              : const Color(0xFF0284C7))
+                                          .withValues(alpha: 0.35),
                                   blurRadius: 10,
                                   offset: const Offset(0, 3),
                                 ),
@@ -386,15 +378,22 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                             ),
                             child: currentUser?.imageUrl != null
                                 ? ClipOval(
-                                    child: Image.network(
-                                      currentUser!.imageUrl!,
+                                    child: CachedNetworkImage(
+                                      imageUrl: currentUser!.imageUrl!,
+                                      width: 32,
+                                      height: 32,
+                                      memCacheWidth: 96,
+                                      memCacheHeight: 96,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => Center(
-                                        child: Text(initials,
-                                            style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 12)),
+                                      errorWidget: (_, _, _) => Center(
+                                        child: Text(
+                                          initials,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   )
@@ -426,6 +425,38 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                               ),
                             ),
                           ),
+                          if (unreadCount > 0)
+                            Positioned(
+                              top: -3,
+                              right: -4,
+                              child: Tooltip(
+                                message: 'Community notifications',
+                                child: Material(
+                                  color: const Color(0xFFEF4444),
+                                  shape: const CircleBorder(),
+                                  child: InkWell(
+                                    customBorder: const CircleBorder(),
+                                    onTap: () => context.push('/notifications'),
+                                    child: Container(
+                                      width: 19,
+                                      height: 19,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: sidebarBg,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.notifications_rounded,
+                                        color: Colors.white,
+                                        size: 10,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                       if (!isCompact) ...[
@@ -448,12 +479,15 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                             ),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 5, vertical: 1),
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
                               decoration: BoxDecoration(
-                                color: (canTeach
-                                        ? const Color(0xFF8B5CF6)
-                                        : const Color(0xFF0284C7))
-                                    .withValues(alpha: 0.15),
+                                color:
+                                    (canTeach
+                                            ? const Color(0xFF8B5CF6)
+                                            : const Color(0xFF0284C7))
+                                        .withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -471,9 +505,11 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
                           ],
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.keyboard_arrow_down_rounded,
-                            size: 16,
-                            color: colorScheme.onSurfaceVariant),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 16,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
                       ],
                     ],
                   ),
