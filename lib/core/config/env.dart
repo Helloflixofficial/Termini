@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 
 class AppEnv {
   const AppEnv._();
@@ -6,7 +7,9 @@ class AppEnv {
 
   static String get apiBaseUrl {
     if (_envApiBaseUrl.isNotEmpty) return _envApiBaseUrl;
-    return 'http://127.0.0.1:3000';
+    return defaultTargetPlatform == TargetPlatform.android
+        ? 'http://10.0.2.2:3000'
+        : 'http://localhost:3000';
   }
 
   static const String clerkPublishableKey = String.fromEnvironment(

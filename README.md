@@ -65,11 +65,11 @@ Minor RESTful adjustments made to the backend are documented in detail in [`BACK
 
 ## Configuration & Environment Variables
 
-Configure application settings at build/run time using `--dart-define` flags:
+Configure application settings at build/run time using `--dart-define` flags. The root `.env.example` is a reference template; Flutter does not automatically load it. Never put backend secret keys in Flutter `--dart-define` values.
 
 | Variable | Default Value | Description |
 |---|---|---|
-| `API_BASE_URL` | Android: `http://10.0.2.2:3000`<br>Web/Desktop: `http://localhost:3000` | Backend API base URL |
+| `API_BASE_URL` | Android emulator: `http://10.0.2.2:3000`<br>Web/Desktop: `http://localhost:3000` | Backend API base URL |
 | `CLERK_PUBLISHABLE_KEY` | `pk_test_sample` | Clerk publishable key |
 | `LIVEKIT_URL` | `wss://livekit.example.com` | LiveKit WebRTC server endpoint |
 | `STRIPE_PUBLISHABLE_KEY` | `pk_test_...` | Stripe publishable key |
@@ -105,8 +105,7 @@ flutter run --dart-define=API_BASE_URL=http://192.168.1.100:3000
 
 ## 🚀 How to Start This App (Step-by-Step)
 
-This project has **two parts**: a Node.js custom backend (`backend_repo/`) and a Flutter mobile app.  
-Both must be running at the same time for the app to work properly.
+This project has **two parts**: the Node.js backend (`backend_repo/`) and the Flutter app. Both must be running for live course and community data. A fresh computer also needs credentials for the same database and third-party services; private credentials are intentionally not stored in GitHub.
 
 ---
 
@@ -114,42 +113,40 @@ Both must be running at the same time for the app to work properly.
 
 | Tool | Minimum Version | Check |
 |------|----------------|-------|
-| [Flutter SDK](https://docs.flutter.dev/get-started/install) | `3.13.0` | `flutter --version` |
-| [Node.js](https://nodejs.org/) | `18.x` | `node --version` |
+| [Flutter SDK](https://docs.flutter.dev/get-started/install) | Stable channel | `flutter --version` |
+| [Node.js](https://nodejs.org/) | `18.x` or newer | `node --version` |
 | [Android SDK & ADB](https://developer.android.com/studio) | latest | `adb --version` |
-| USB Debugging | enabled on device | Settings → Developer Options |
+| Git | latest | `git --version` |
+
+On a new computer, clone this repository first and open a terminal in its folder:
+
+```bash
+git clone https://github.com/Helloflixofficial/Termini.git
+cd Termini
+flutter doctor
+flutter pub get
+```
 
 ---
 
 ### Step 1 — Set Up the Backend
 
 ```bash
-# Navigate to backend folder
+# From the project root
 cd backend_repo
 
 # Install Node.js dependencies
 npm install
 
-# Copy the environment file (fill in your Neon DB URL, Clerk keys, etc.)
-copy .env.example .env
+# Create a private local settings file (PowerShell)
+Copy-Item .env.example .env
 ```
 
-Open `backend_repo/.env` and fill in the following variables:
+Open `backend_repo/.env` and add credentials for the services this project uses. Keep this file private and do not commit it. The safe template lists all supported variables. For courses, point `DATABASE_URL` and `DIRECT_URL` at the existing PostgreSQL database; sign-in needs Clerk; playback and uploads need Mux and UploadThing. Checkout and live meetings need Stripe and LiveKit credentials.
 
-```env
-DATABASE_URL=postgresql://<user>:<password>@<host>/<db>?sslmode=require
-CLERK_SECRET_KEY=sk_test_...
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
-MUX_TOKEN_ID=...
-MUX_TOKEN_SECRET=...
-UPLOADTHING_SECRET=...
-UPLOADTHING_APP_ID=...
-STRIPE_API_KEY=sk_test_...
-LIVEKIT_API_KEY=...
-LIVEKIT_API_SECRET=...
-NEXT_PUBLIC_LIVEKIT_URL=wss://...
-NEXT_PUBLIC_TEACHER_ID=user_...
-```
+For a brand-new empty PostgreSQL database, apply the checked-in migrations from `backend_repo` with `npx prisma migrate deploy`. Skip this for an existing database whose schema is already in place.
+
+The Android emulator can reach the backend using the built-in `10.0.2.2` default. On a USB-connected Android phone, run `adb reverse tcp:3000 tcp:3000` while connected so the phone can use `localhost`. For a phone over Wi-Fi, pass the computer's LAN IP as `API_BASE_URL` and allow port 3000 through the computer's firewall.
 
 ---
 
@@ -194,26 +191,20 @@ adb reverse tcp:3000 tcp:3000
 
 ### Step 4 — Run the Flutter App
 
-#### Option A — Run from source (requires Flutter SDK)
+#### Run from source
 ```bash
 # From the project root (termini/)
+flutter pub get
 flutter run -d <your-device-id>
-
-# Example with your device:
-flutter run -d R9WW30565LK
 ```
 
-#### Option B — Install pre-built APK directly
-If you have a built APK (from `build/app/outputs/flutter-apk/`):
+For another backend host, pass its address explicitly:
 
 ```bash
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
-
-# Then launch the app
-adb shell am start -n com.helloflix.termini/com.helloflix.termini.MainActivity
+flutter run -d <your-device-id> --dart-define=API_BASE_URL=http://192.168.1.100:3000
 ```
 
-#### Option B — Build the APK yourself
+To build and install a debug APK yourself:
 ```bash
 flutter build apk --debug
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
@@ -241,9 +232,9 @@ Every time you want to run the app after the initial setup:
 cd backend_repo
 node server.js
 
-# Terminal 2 — Forward port & launch app
+# Terminal 2 — (USB phone only) forward backend port, then launch app
 adb reverse tcp:3000 tcp:3000
-flutter run -d R9WW30565LK
+flutter run -d <your-device-id>
 ```
 
 ---
@@ -271,6 +262,8 @@ flutter run -d chrome
 ```bash
 flutter run -d windows
 ```
+
+Start `node server.js` from `backend_repo` in another terminal first. For database data to appear, the backend `.env` must point to a reachable database with this project's schema and data. The repository includes the Prisma schema and migrations, but does not include a copy of a private production database.
 
 ---
 

@@ -73,6 +73,7 @@ backend_repo/.next/
 .env*.local
 backend_repo/.env
 backend_repo/.env*
+!backend_repo/.env.example
 
 
 # App branding assets
@@ -81,3 +82,6 @@ backend_repo/.env*
 !android/app/src/main/res/mipmap-*/ic_launcher.png
 !ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png
 !ios/Runner/Assets.xcassets/LaunchImage.imageset/*.png
+!macos/Runner/Assets.xcassets/AppIcon.appiconset/*.png
+!web/*.png
+!web/icons/*.png
