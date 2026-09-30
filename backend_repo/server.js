@@ -1,63 +1,109 @@
 const http = require('http');
-const url = require('url');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { verifyToken } = require('@clerk/backend');
+const { AccessToken } = require('livekit-server-sdk');
 
-const PORT = process.env.PORT || 3000;
+const MAX_BODY_BYTES = 1024 * 1024;
+const VIDEO_ACCESS_CACHE_TTL_MS = 15000;
+const MAX_VIDEO_ACCESS_CACHE_ENTRIES = 5000;
+const videoAccessCache = new Map();
 
 // ─── Load .env manually (no dotenv dep required) ─────────────────────────────
 const envPath = path.join(__dirname, '.env');
 if (fs.existsSync(envPath)) {
-  fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
+  fs.readFileSync(envPath, 'utf8').split(/\r?\n/).forEach(line => {
     const trimmed = line.trim();
     if (trimmed && !trimmed.startsWith('#')) {
       const idx = trimmed.indexOf('=');
       if (idx !== -1) {
         const key = trimmed.substring(0, idx).trim();
-        const val = trimmed.substring(idx + 1).trim();
+        let val = trimmed.substring(idx + 1).trim();
+        if (val.length >= 2 && ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))) {
+          val = val.slice(1, -1);
+        }
         if (!process.env[key]) process.env[key] = val;
       }
     }
   });
 }
 
+const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const isProduction = process.env.NODE_ENV === 'production';
+
 // ─── Real Neon PostgreSQL connection ─────────────────────────────────────────
 const { Pool } = require('pg');
+const databaseUrl = process.env.DATABASE_URL || process.env.DIRECT_URL;
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.DIRECT_URL,
+  connectionString: databaseUrl,
   ssl: { rejectUnauthorized: false },
-  max: 5,
+  max: Math.min(50, Math.max(1, Number.parseInt(process.env.PG_POOL_MAX || '5', 10) || 5)),
+  connectionTimeoutMillis: 10000,
   idleTimeoutMillis: 30000,
 });
 
-pool.connect((err, client, done) => {
-  if (err) {
-    console.error('[DB] Failed to connect to Neon PostgreSQL:', err.message);
-  } else {
-    console.log('[DB] Connected to Neon PostgreSQL successfully!');
-    done();
-  }
+pool.on('error', (err) => {
+  console.error('[DB] Idle connection error:', err.code || err.name || 'unknown error');
 });
 
 // ─── DB query helpers ─────────────────────────────────────────────────────────
 async function dbQuery(sql, params = []) {
-  const client = await pool.connect();
-  try {
-    const result = await client.query(sql, params);
-    return result.rows;
-  } finally {
-    client.release();
+  const result = await pool.query(sql, params);
+  return result.rows;
+}
+
+async function canUserWatchChapter(chapterId, userId) {
+  const key = `${userId}:${chapterId}`;
+  const cached = videoAccessCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.allowed;
+  if (cached) videoAccessCache.delete(key);
+
+  const rows = await dbQuery(
+    `SELECT ch."isFree",
+            EXISTS(SELECT 1 FROM "Purchase" p WHERE p."courseId" = ch."courseId" AND p."userId" = $2) AS "isPurchased"
+     FROM "Chapter" ch WHERE ch."id" = $1 LIMIT 1`,
+    [chapterId, userId],
+  );
+  const allowed = rows.length > 0 && (rows[0].isFree || rows[0].isPurchased);
+  if (allowed) {
+    if (videoAccessCache.size >= MAX_VIDEO_ACCESS_CACHE_ENTRIES) {
+      const oldestKey = videoAccessCache.keys().next().value;
+      if (oldestKey) videoAccessCache.delete(oldestKey);
+    }
+    videoAccessCache.set(key, { allowed, expiresAt: Date.now() + VIDEO_ACCESS_CACHE_TTL_MS });
   }
+  return allowed;
 }
 
 // Load all published courses with chapters + mux data + category from DB
-async function loadCoursesFromDB(filterUserId = null, publishedOnly = false) {
+async function loadCoursesFromDB(filterUserId = null, publishedOnly = false, options = {}) {
   // Note: Prisma mapped Course -> "title" table in this schema
-  let courseWhere = publishedOnly ? `WHERE c."isPublished" = true` : 'WHERE 1=1';
+  const filters = [];
+  const params = [];
+  if (publishedOnly) filters.push('c."isPublished" = true');
   if (filterUserId) {
-    courseWhere += ` AND c."userId" = '${filterUserId.replace(/'/g, "''")}'`;
+    params.push(filterUserId);
+    filters.push(`c."userId" = $${params.length}`);
   }
+  if (options.courseId) {
+    params.push(options.courseId);
+    filters.push(`c."id" = $${params.length}`);
+  }
+  if (Array.isArray(options.courseIds)) {
+    if (options.courseIds.length === 0) return [];
+    params.push(options.courseIds);
+    filters.push(`c."id" = ANY($${params.length}::text[])`);
+  }
+  if (options.categoryId) {
+    params.push(options.categoryId);
+    filters.push(`c."categoryId" = $${params.length}`);
+  }
+  if (options.title) {
+    params.push(`%${options.title.replace(/[\\%_]/g, '\\$&')}%`);
+    filters.push(`c."title" ILIKE $${params.length} ESCAPE '\\'`);
+  }
+  const courseWhere = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
   const courseRows = await dbQuery(`
     SELECT c.*, cat."name" as "categoryName"
@@ -65,7 +111,7 @@ async function loadCoursesFromDB(filterUserId = null, publishedOnly = false) {
     LEFT JOIN "Category" cat ON c."categoryId" = cat."id"
     ${courseWhere}
     ORDER BY c."updatedAt" DESC
-  `);
+  `, params);
 
   if (courseRows.length === 0) return [];
 
@@ -73,10 +119,15 @@ async function loadCoursesFromDB(filterUserId = null, publishedOnly = false) {
   const placeholders = courseIds.map((_, i) => `$${i + 1}`).join(',');
 
   // Load chapters
+  const includeMux = options.includeMux !== false;
+  const mediaColumns = includeMux
+    ? 'md."assetId", md."playbackId", md."id" as "muxId"'
+    : 'NULL::text AS "assetId", NULL::text AS "playbackId", NULL::text AS "muxId"';
+  const mediaJoin = includeMux ? 'LEFT JOIN "MuxData" md ON md."chapterId" = ch."id"' : '';
   const chapterRows = await dbQuery(`
-    SELECT ch.*, md."assetId", md."playbackId", md."id" as "muxId"
+    SELECT ch.*, ${mediaColumns}
     FROM "Chapter" ch
-    LEFT JOIN "MuxData" md ON md."chapterId" = ch."id"
+    ${mediaJoin}
     WHERE ch."courseId" IN (${placeholders})
     ORDER BY ch."position" ASC
   `, courseIds);
@@ -131,6 +182,16 @@ function getCommunityOwnerId() {
   return (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',')[0].trim();
 }
 
+function safeHttpsUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function loadCommunitySpacesFromDB() {
   const ownerId = getCommunityOwnerId();
   if (!ownerId) throw new Error('Community owner is not configured');
@@ -155,6 +216,13 @@ async function loadCommunityPostsFromDB(spaceId, userId) {
     spaceFilter = `AND p."spaceId" = $${params.length}`;
   }
   const userParam = userId ? (params.push(userId), `$${params.length}`) : 'NULL';
+  const teacherIds = (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim());
+  const isTeacherViewer = teacherIds.includes(userId) || (!isProduction && Boolean(users[userId]?.isTeacher));
+  let approvalFilter = '';
+  if (!isTeacherViewer && userId) {
+    params.push(userId);
+    approvalFilter = `AND (p."isApproved" = true OR p."authorId" = $${params.length})`;
+  }
 
   return dbQuery(
     `SELECT
@@ -164,25 +232,29 @@ async function loadCommunityPostsFromDB(spaceId, userId) {
        p."authorName", p."authorImageUrl",
        COALESCE(l."likesCount", 0)::int AS "likesCount",
        COALESCE(l."isLikedByMe", false) AS "isLikedByMe",
-       json_build_object('id', s."id", 'name', s."name", 'color', s."color") AS "space",
-       COALESCE(
-         json_agg(json_build_object(
-           'id', c."id", 'content', c."content", 'authorId', c."authorId",
-           'postId', c."postId", 'createdAt', c."createdAt",
-           'authorName', c."authorName", 'authorImageUrl', c."authorImageUrl"
-         ) ORDER BY c."createdAt" ASC) FILTER (WHERE c."id" IS NOT NULL),
-         '[]'::json
-       ) AS "comments"
+       COALESCE(comments_data."comments", '[]'::json) AS "comments",
+       (SELECT COUNT(*)::int FROM "CommunityComment" cc WHERE cc."postId" = p."id") AS "commentsCount",
+       json_build_object('id', s."id", 'name', s."name", 'color', s."color") AS "space"
      FROM "CommunityPost" p
      JOIN "CommunitySpace" s ON s."id" = p."spaceId"
-     LEFT JOIN "CommunityComment" c ON c."postId" = p."id"
      LEFT JOIN LATERAL (
        SELECT COUNT(*) AS "likesCount",
               BOOL_OR("userId" = ${userParam}) AS "isLikedByMe"
        FROM "CommunityLike" WHERE "postId" = p."id"
      ) l ON true
-     WHERE p."ownerId" = $1 ${spaceFilter}
-     GROUP BY p."id", s."id", l."likesCount", l."isLikedByMe"
+     LEFT JOIN LATERAL (
+       SELECT COALESCE(json_agg(json_build_object(
+         'id', c."id", 'content', c."content", 'authorId', c."authorId",
+         'postId', c."postId", 'createdAt', c."createdAt",
+         'authorName', c."authorName", 'authorImageUrl', c."authorImageUrl"
+       ) ORDER BY c."createdAt" ASC), '[]'::json) AS "comments"
+       FROM (
+         SELECT "id", "content", "authorId", "postId", "createdAt", "authorName", "authorImageUrl"
+         FROM "CommunityComment" WHERE "postId" = p."id"
+         ORDER BY "createdAt" DESC LIMIT 20
+       ) c
+     ) comments_data ON true
+     WHERE p."ownerId" = $1 ${spaceFilter} ${approvalFilter}
      ORDER BY p."isPinned" DESC, p."createdAt" DESC
      LIMIT 100`,
     params,
@@ -438,6 +510,21 @@ function extractUserId(req) {
   return 'student_learner_demo'; // default dev user
 }
 
+async function resolveUserId(req) {
+  if (!isProduction) return extractUserId(req);
+
+  const authorization = req.headers.authorization || '';
+  if (!authorization.startsWith('Bearer ')) return null;
+  const bearer = authorization.slice(7).trim();
+  const token = bearer.startsWith('clerk_session_')
+    ? bearer.slice('clerk_session_'.length)
+    : bearer;
+  if (!token || !process.env.CLERK_SECRET_KEY) return null;
+
+  const payload = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
+  return typeof payload.sub === 'string' && payload.sub ? payload.sub : null;
+}
+
 async function addCoursePurchaseState(courses, userId) {
   if (!courses.length) return [];
   const courseIds = courses.map(course => course.id);
@@ -474,36 +561,96 @@ async function addCoursePurchaseState(courses, userId) {
 function sendJson(res, statusCode, data) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    'Access-Control-Allow-Headers': '*',
-    'Access-Control-Allow-Credentials': 'true',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
   });
   res.end(JSON.stringify(data));
 }
 
 function sendCors(res) {
   res.writeHead(204, {
-    'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-    'Access-Control-Allow-Headers': '*',
-    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-User-Id, Range',
+    'Access-Control-Max-Age': '600',
   });
   res.end();
 }
 
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+
+  const configuredOrigins = (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  let isAllowed = configuredOrigins.includes(origin);
+  if (!isProduction && !isAllowed) {
+    try {
+      const parsedOrigin = new URL(origin);
+      isAllowed = ['localhost', '127.0.0.1', '::1'].includes(parsedOrigin.hostname);
+    } catch (_) {}
+  }
+  if (!isAllowed) return false;
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Vary', 'Origin');
+  return true;
+}
+
 // Request Body Parser
 function parseBody(req) {
-  return new Promise((resolve) => {
-    let body = '';
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const contentLength = Number.parseInt(req.headers['content-length'] || '0', 10);
+    if (contentLength > MAX_BODY_BYTES) {
+      const error = new Error('Request body is too large');
+      error.statusCode = 413;
+      req.resume();
+      reject(error);
+      return;
+    }
     req.on('data', (chunk) => {
-      body += chunk.toString();
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        if (!settled) {
+          settled = true;
+          const error = new Error('Request body is too large');
+          error.statusCode = 413;
+          reject(error);
+          req.resume();
+        }
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on('end', () => {
+      if (settled) return;
       try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (e) {
-        resolve({});
+        const body = Buffer.concat(chunks).toString('utf8');
+        const parsed = body ? JSON.parse(body) : {};
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          const error = new Error('JSON request body must be an object');
+          error.statusCode = 400;
+          reject(error);
+          return;
+        }
+        settled = true;
+        resolve(parsed);
+      } catch (_) {
+        const error = new Error('Request body contains invalid JSON');
+        error.statusCode = 400;
+        settled = true;
+        reject(error);
+      }
+    });
+    req.on('error', error => {
+      if (!settled) {
+        settled = true;
+        reject(error);
       }
     });
   });
@@ -511,6 +658,9 @@ function parseBody(req) {
 
 // Video Streaming Endpoint with Full HTTP 206 Byte Range Support (ExoPlayer compatible)
 function serveVideoStream(req, res, chapterId) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(chapterId)) {
+    return sendJson(res, 404, { error: 'Video not found' });
+  }
   const videoDir = path.join(__dirname, 'public', 'videos');
   const filePath = path.join(videoDir, `${chapterId}.mp4`);
 
@@ -518,7 +668,13 @@ function serveVideoStream(req, res, chapterId) {
     return sendJson(res, 404, { error: 'Video file not found or not yet cached' });
   }
 
-  const stat = fs.statSync(filePath);
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    return sendJson(res, 404, { error: 'Video not found' });
+  }
+  if (!stat.isFile()) return sendJson(res, 404, { error: 'Video not found' });
   const fileSize = stat.size;
   const range = req.headers.range;
 
@@ -527,72 +683,124 @@ function serveVideoStream(req, res, chapterId) {
       'Content-Length': fileSize,
       'Accept-Ranges': 'bytes',
       'Content-Type': 'video/mp4',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Range, Origin, Content-Type, Accept',
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
     });
     return res.end();
   }
 
   if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-    if (start >= fileSize) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match || (!match[1] && !match[2])) {
       res.writeHead(416, {
         'Content-Range': `bytes */${fileSize}`,
-        'Access-Control-Allow-Origin': '*',
       });
       return res.end();
     }
 
-    const chunksize = (end - start) + 1;
+    let start = match[1] ? Number(match[1]) : null;
+    let end = match[2] ? Number(match[2]) : null;
+    if (start === null) {
+      const suffixLength = end;
+      if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) {
+        res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+        return res.end();
+      }
+      start = Math.max(fileSize - suffixLength, 0);
+      end = fileSize - 1;
+    } else {
+      if (!Number.isSafeInteger(start) || start >= fileSize || (end !== null && (!Number.isSafeInteger(end) || end < start))) {
+        res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
+        return res.end();
+      }
+      end = Math.min(end ?? fileSize - 1, fileSize - 1);
+    }
+
+    const chunksize = end - start + 1;
     const file = fs.createReadStream(filePath, { start, end });
-    const head = {
+    res.writeHead(206, {
       'Content-Range': `bytes ${start}-${end}/${fileSize}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': chunksize,
       'Content-Type': 'video/mp4',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Range, Origin, Content-Type, Accept',
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
-    };
-    res.writeHead(206, head);
+    });
+    file.on('error', () => res.destroy());
     file.pipe(res);
   } else {
-    const head = {
+    res.writeHead(200, {
       'Content-Length': fileSize,
       'Accept-Ranges': 'bytes',
       'Content-Type': 'video/mp4',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Range, Origin, Content-Type, Accept',
       'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
-    };
-    res.writeHead(200, head);
-    fs.createReadStream(filePath).pipe(res);
+    });
+    const file = fs.createReadStream(filePath);
+    file.on('error', () => res.destroy());
+    file.pipe(res);
   }
 }
 
 // HTTP Server
-const server = http.createServer(async (req, res) => {
-  const parsedUrl = url.parse(req.url, true);
+const server = http.createServer((req, res) => {
+  handleRequest(req, res).catch(error => {
+    console.error('[HTTP] Unhandled request error:', error.code || error.name || 'unknown error');
+    if (res.headersSent) return res.destroy();
+    const statusCode = error.statusCode || (error instanceof URIError ? 400 : 500);
+    return sendJson(res, statusCode, {
+      error: error.statusCode ? error.message : (error instanceof URIError ? 'Invalid URL encoding' : 'Internal server error'),
+    });
+  });
+});
+
+async function handleRequest(req, res) {
+  const parsedUrl = new URL(req.url, 'http://localhost');
+  const query = Object.fromEntries(parsedUrl.searchParams.entries());
   const pathname = parsedUrl.pathname;
   const method = req.method.toUpperCase();
+
+  if (!applyCors(req, res)) {
+    return sendJson(res, 403, { error: 'Origin is not allowed' });
+  }
+
+  if (pathname === '/healthz' && method === 'GET') {
+    try {
+      await dbQuery('SELECT 1');
+      return sendJson(res, 200, { status: 'ok', database: 'connected' });
+    } catch (_) {
+      return sendJson(res, 503, { status: 'degraded', database: 'unavailable' });
+    }
+  }
 
   // Handle CORS Preflight
   if (method === 'OPTIONS') {
     return sendCors(res);
   }
 
-  // 0. Video Streaming Endpoint (HTTP 206 Byte Range)
+  let userId;
+  try {
+    userId = await resolveUserId(req);
+  } catch (_) {
+    return sendJson(res, 401, { error: 'Authentication required' });
+  }
+  if (!userId) return sendJson(res, 401, { error: 'Authentication required' });
+
+  if (isProduction && (pathname === '/api/auth/sign-in' || pathname === '/api/auth/sign-up')) {
+    return sendJson(res, 410, { error: 'Sign-in is managed by Clerk' });
+  }
+
+  // Video Streaming Endpoint (HTTP 206 Byte Range)
   const videoStreamMatch = pathname.match(/^\/api\/videos\/([^\/]+)$/);
   if (videoStreamMatch && (method === 'GET' || method === 'HEAD')) {
     const chapterId = videoStreamMatch[1];
+    try {
+      if (!await canUserWatchChapter(chapterId, userId)) {
+        return sendJson(res, 403, { error: 'Video is unavailable or enrollment is required' });
+      }
+    } catch (error) {
+      console.error('[Video] Database error:', error.code || error.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to verify video access' });
+    }
     return serveVideoStream(req, res, chapterId);
   }
-
-  const userId = extractUserId(req);
 
   // 1. Auth Sign In
   if (pathname === '/api/auth/sign-in' && method === 'POST') {
@@ -646,6 +854,35 @@ const server = http.createServer(async (req, res) => {
 
   // 3. User Profile (GET & PUT)
   if ((pathname === '/api/user/profile' || pathname === '/api/user/me') && method === 'GET') {
+    if (isProduction) {
+      try {
+        const [purchaseRows, progressRows] = await Promise.all([
+          dbQuery('SELECT COUNT(*)::int AS count FROM "Purchase" WHERE "userId" = $1', [userId]),
+          dbQuery('SELECT COUNT(*)::int AS count FROM "UserProgress" WHERE "userId" = $1 AND "isCompleted" = true', [userId]),
+        ]);
+        const configuredTeachers = (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim());
+        return sendJson(res, 200, {
+          id: userId,
+          email: '',
+          firstName: '',
+          lastName: '',
+          bio: '',
+          imageUrl: null,
+          isTeacher: configuredTeachers.includes(userId),
+          joinedDate: null,
+          stats: {
+            enrolledCoursesCount: purchaseRows[0].count,
+            completedChaptersCount: progressRows[0].count,
+            certificatesCount: 0,
+            hoursLearned: 0,
+          },
+        });
+      } catch (error) {
+        console.error('[Profile] Database error:', error.code || error.name || 'unknown error');
+        return sendJson(res, 500, { error: 'Unable to load profile data' });
+      }
+    }
+
     let user = users[userId];
     if (!user) {
       user = {
@@ -680,6 +917,9 @@ const server = http.createServer(async (req, res) => {
   }
 
   if ((pathname === '/api/user/profile' || pathname === '/api/user/me') && method === 'PUT') {
+    if (isProduction) {
+      return sendJson(res, 501, { error: 'Profile updates must be saved through Clerk' });
+    }
     const body = await parseBody(req);
     let user = users[userId] || { id: userId };
     user.firstName = body.firstName !== undefined ? body.firstName : user.firstName;
@@ -699,9 +939,15 @@ const server = http.createServer(async (req, res) => {
         [userId]
       );
       const purchasedCourseIds = new Set(purchaseRows.map(r => r.courseId));
+      if (purchasedCourseIds.size === 0) {
+        return sendJson(res, 200, { completedCourses: [], coursesInProgress: [] });
+      }
 
-      // Load ALL published courses from DB
-      const allCourses = await loadCoursesFromDB(null, true);
+      // Only load courses the current student has purchased.
+      const allCourses = await loadCoursesFromDB(null, true, {
+        courseIds: [...purchasedCourseIds],
+        includeMux: false,
+      });
 
       // Get user progress from DB
       const progressRows = await dbQuery(
@@ -738,8 +984,8 @@ const server = http.createServer(async (req, res) => {
 
       return sendJson(res, 200, { completedCourses, coursesInProgress });
     } catch (dbErr) {
-      console.error('[Dashboard] DB error:', dbErr.message);
-      return sendJson(res, 500, { error: 'Database error: ' + dbErr.message });
+      console.error('[Dashboard] Database error:', dbErr.code || dbErr.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to load dashboard data' });
     }
   }
 
@@ -747,32 +993,42 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/categories' && method === 'GET') {
     try {
       const cats = await loadCategoriesFromDB();
-      return sendJson(res, 200, cats.length > 0 ? cats : categories);
+      return sendJson(res, 200, isProduction ? cats : (cats.length > 0 ? cats : categories));
     } catch (e) {
-      return sendJson(res, 200, categories);
+      return sendJson(res, isProduction ? 503 : 200,
+        isProduction ? { error: 'Unable to load categories' } : categories);
     }
   }
 
   // 6. Courses Search & Catalog — real from DB
   if (pathname === '/api/courses' && method === 'GET') {
     try {
-      const qTitle = (parsedUrl.query.title || '').toLowerCase();
-      const qCategoryId = parsedUrl.query.categoryId || '';
-      let allCourses = await addCoursePurchaseState(
-        await loadCoursesFromDB(null, true),
+      const qTitle = typeof query.title === 'string'
+        ? query.title.trim().slice(0, 120)
+        : '';
+      const qCategoryId = typeof query.categoryId === 'string'
+        ? query.categoryId.slice(0, 128)
+        : '';
+      const allCourses = await addCoursePurchaseState(
+        await loadCoursesFromDB(null, true, {
+          ...(qTitle ? { title: qTitle } : {}),
+          ...(qCategoryId ? { categoryId: qCategoryId } : {}),
+          includeMux: false,
+        }),
         userId,
       );
-      if (qTitle) allCourses = allCourses.filter(c => c.title.toLowerCase().includes(qTitle));
-      if (qCategoryId) allCourses = allCourses.filter(c => c.categoryId === qCategoryId);
       return sendJson(res, 200, allCourses);
     } catch (e) {
-      console.error('[Courses] DB error:', e.message);
-      return sendJson(res, 500, { error: e.message });
+      console.error('[Courses] Database error:', e.code || e.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to load courses' });
     }
   }
 
   // 7. Teacher Create Course (POST /api/courses)
   if (pathname === '/api/courses' && method === 'POST') {
+    if (isProduction) {
+      return sendJson(res, 501, { error: 'Course creation is not available on this API server' });
+    }
     const body = await parseBody(req);
     const newCourse = {
       id: `course-${Date.now()}`,
@@ -797,12 +1053,21 @@ const server = http.createServer(async (req, res) => {
   if (singleCourseMatch && method === 'GET') {
     const courseId = singleCourseMatch[1];
     try {
-      const allCourses = await addCoursePurchaseState(await loadCoursesFromDB(), userId);
-      const course = allCourses.find(c => c.id === courseId);
+      const coursesForId = await loadCoursesFromDB(null, false, { courseId });
+      let course = (await addCoursePurchaseState(coursesForId, userId))[0];
       if (!course) return sendJson(res, 404, { error: 'Course not found' });
+      if (isProduction && !course.isPurchased) {
+        course = {
+          ...course,
+          chapters: course.chapters.map(chapter => ({
+            ...chapter,
+            muxData: chapter.isFree ? chapter.muxData : null,
+          })),
+        };
+      }
       return sendJson(res, 200, course);
     } catch (e) {
-      return sendJson(res, 500, { error: e.message });
+      return sendJson(res, 500, { error: 'Unable to load course details' });
     }
   }
 
@@ -812,8 +1077,8 @@ const server = http.createServer(async (req, res) => {
     const courseId = chapterMatch[1];
     const chapterId = chapterMatch[2];
     try {
-      const allCourses = await loadCoursesFromDB();
-      const course = allCourses.find(c => c.id === courseId);
+      const coursesForId = await loadCoursesFromDB(null, false, { courseId });
+      const course = coursesForId[0];
       if (!course) return sendJson(res, 404, { error: 'Course not found' });
       const chapter = course.chapters?.find(ch => ch.id === chapterId);
       if (!chapter) return sendJson(res, 404, { error: 'Chapter not found' });
@@ -823,6 +1088,9 @@ const server = http.createServer(async (req, res) => {
         [userId, courseId]
       );
       const hasPurchased = purchaseRows.length > 0;
+      if (isProduction && !hasPurchased && !chapter.isFree) {
+        return sendJson(res, 403, { error: 'Course enrollment is required for this chapter' });
+      }
 
       const progressRows = await dbQuery(
         'SELECT "isCompleted" FROM "UserProgress" WHERE "userId" = $1 AND "chapterId" = $2',
@@ -846,7 +1114,7 @@ const server = http.createServer(async (req, res) => {
         userProgress: { id: `prog-${chapterId}`, userId, chapterId, isCompleted },
       });
     } catch (e) {
-      return sendJson(res, 500, { error: e.message });
+      return sendJson(res, 500, { error: 'Unable to load chapter details' });
     }
   }
 
@@ -855,24 +1123,31 @@ const server = http.createServer(async (req, res) => {
   if (progressMatch && method === 'PUT') {
     const chapterId = progressMatch[2];
     const body = await parseBody(req);
-    const isCompleted = !!body.isCompleted;
+    const isCompleted = body.isCompleted === true;
 
-    if (!userProgress[userId]) {
-      userProgress[userId] = {};
+    try {
+      const rows = await dbQuery(
+        `INSERT INTO "UserProgress" ("id", "userId", "chapterId", "isCompleted", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, NOW(), NOW())
+         ON CONFLICT ("userId", "chapterId")
+         DO UPDATE SET "isCompleted" = EXCLUDED."isCompleted", "updatedAt" = NOW()
+         RETURNING "id", "userId", "chapterId", "isCompleted"`,
+        [crypto.randomUUID(), userId, chapterId, isCompleted],
+      );
+      return sendJson(res, 200, rows[0]);
+    } catch (error) {
+      console.error('[Progress] Database error:', error.code || error.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to update chapter progress' });
     }
-    userProgress[userId][chapterId] = isCompleted;
 
-    return sendJson(res, 200, {
-      id: `prog-${chapterId}`,
-      userId: userId,
-      chapterId: chapterId,
-      isCompleted: isCompleted,
-    });
   }
 
   // 11. Checkout Endpoint (POST /api/courses/:courseId/checkout)
   const checkoutMatch = pathname.match(/^\/api\/courses\/([^\/]+)\/checkout$/);
   if (checkoutMatch && method === 'POST') {
+    if (isProduction) {
+      return sendJson(res, 501, { error: 'Checkout is not configured on this API server' });
+    }
     const courseId = checkoutMatch[1];
     if (!purchases[userId]) {
       purchases[userId] = new Set();
@@ -888,21 +1163,64 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/teacher/courses' && method === 'GET') {
     try {
       // Load courses for this teacher userId (the Clerk user ID)
-      const teacherCourses = await loadCoursesFromDB(userId);
-      if (teacherCourses.length > 0) {
-        return sendJson(res, 200, teacherCourses);
-      }
+      const teacherCourses = await loadCoursesFromDB(userId, false, { includeMux: false });
+      if (teacherCourses.length > 0 || isProduction) return sendJson(res, 200, teacherCourses);
       // Fallback: if userId doesn't match, return all courses for teacher_admin
-      const allCourses = await loadCoursesFromDB('user_2ZrBFVtrrTrK0EbbS93RQHjQgX3');
+      const allCourses = await loadCoursesFromDB('user_2ZrBFVtrrTrK0EbbS93RQHjQgX3', false, { includeMux: false });
       return sendJson(res, 200, allCourses);
     } catch (e) {
-      console.error('[Teacher Courses] DB error:', e.message);
-      return sendJson(res, 500, { error: e.message });
+      console.error('[Teacher Courses] Database error:', e.code || e.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to load teacher courses' });
     }
   }
 
   // 13. Teacher Analytics (GET /api/teacher/analytics)
   if (pathname === '/api/teacher/analytics' && method === 'GET') {
+    if (isProduction) {
+      const teacherIds = (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim()).filter(Boolean);
+      if (!teacherIds.includes(userId)) return sendJson(res, 403, { error: 'Teacher access required' });
+      try {
+        const totals = await dbQuery(
+          `SELECT COUNT(*)::int AS "totalSales",
+                  COALESCE(SUM(c."price"), 0)::float AS "totalRevenue"
+           FROM "Purchase" p
+           JOIN "title" c ON c."id" = p."courseId"
+           WHERE c."userId" = $1`,
+          [userId],
+        );
+        const monthlyRows = await dbQuery(
+          `SELECT DATE_TRUNC('month', p."createdAt") AS "month",
+                  COALESCE(SUM(c."price"), 0)::float AS "total"
+           FROM "Purchase" p
+           JOIN "title" c ON c."id" = p."courseId"
+           WHERE c."userId" = $1
+             AND p."createdAt" >= DATE_TRUNC('month', NOW()) - INTERVAL '5 months'
+           GROUP BY DATE_TRUNC('month', p."createdAt")
+           ORDER BY "month" ASC`,
+          [userId],
+        );
+        const monthlyTotals = new Map(monthlyRows.map(row => [
+          new Date(row.month).toISOString().slice(0, 7),
+          Number(row.total),
+        ]));
+        const now = new Date();
+        const data = Array.from({ length: 6 }, (_, index) => {
+          const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5 + index, 1));
+          return {
+            name: month.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+            total: monthlyTotals.get(month.toISOString().slice(0, 7)) || 0,
+          };
+        });
+        return sendJson(res, 200, {
+          data,
+          totalRevenue: Number(totals[0]?.totalRevenue || 0),
+          totalSales: Number(totals[0]?.totalSales || 0),
+        });
+      } catch (error) {
+        console.error('[Teacher Analytics] Database error:', error.code || error.name || 'unknown error');
+        return sendJson(res, 500, { error: 'Unable to load teacher analytics' });
+      }
+    }
     return sendJson(res, 200, {
       data: [
         { name: 'Jan', total: 1200 },
@@ -922,8 +1240,71 @@ const server = http.createServer(async (req, res) => {
     try {
       return sendJson(res, 200, await loadCommunitySpacesFromDB());
     } catch (e) {
-      console.error('[Community Spaces] DB error:', e.message);
+      console.error('[Community Spaces] Database error:', e.code || e.name || 'unknown error');
       return sendJson(res, 500, { error: 'Unable to load community spaces' });
+    }
+  }
+
+  if (pathname === '/api/community/settings' && (method === 'GET' || method === 'PATCH')) {
+    const ownerId = getCommunityOwnerId();
+    const teacherIds = (process.env.NEXT_PUBLIC_TEACHER_ID || '')
+      .split(',').map(id => id.trim()).filter(Boolean);
+    const isTeacher = teacherIds.includes(userId) || (!isProduction && Boolean(users[userId]?.isTeacher));
+    if (!ownerId || !isTeacher) {
+      return sendJson(res, 403, { error: 'Teacher access required' });
+    }
+
+    const fields = `"communityName", "tagline", "welcomeMessage", "allowStudentPosts",
+                    "allowStudentComments", "requirePostApproval", "showMemberCount"`;
+    try {
+      if (method === 'GET') {
+        const settings = await dbQuery(
+          `SELECT ${fields} FROM "CommunitySettings" WHERE "ownerId" = $1 LIMIT 1`,
+          [ownerId],
+        );
+        return sendJson(res, 200, settings[0] || {
+          communityName: 'Community',
+          tagline: 'Learn together, grow together.',
+          welcomeMessage: null,
+          allowStudentPosts: true,
+          allowStudentComments: true,
+          requirePostApproval: false,
+          showMemberCount: true,
+        });
+      }
+
+      const body = await parseBody(req);
+      const communityName = typeof body.communityName === 'string' ? body.communityName.trim() : '';
+      const tagline = typeof body.tagline === 'string' ? body.tagline.trim() : '';
+      const welcomeMessage = typeof body.welcomeMessage === 'string' ? body.welcomeMessage.trim() : null;
+      const booleanFields = ['allowStudentPosts', 'allowStudentComments', 'requirePostApproval', 'showMemberCount'];
+      if (communityName.length < 2 || communityName.length > 80 || tagline.length > 160 ||
+          (welcomeMessage && welcomeMessage.length > 600) ||
+          booleanFields.some(field => typeof body[field] !== 'boolean')) {
+        return sendJson(res, 400, { error: 'Invalid community settings' });
+      }
+
+      const values = [
+        communityName, tagline, welcomeMessage || null,
+        body.allowStudentPosts, body.allowStudentComments,
+        body.requirePostApproval, body.showMemberCount,
+      ];
+      const assignments = [
+        '"communityName"', '"tagline"', '"welcomeMessage"',
+        '"allowStudentPosts"', '"allowStudentComments"',
+        '"requirePostApproval"', '"showMemberCount"',
+      ].map((field, index) => `${field} = $${index + 3}`).join(', ');
+      const rows = await dbQuery(
+        `INSERT INTO "CommunitySettings" ("id", "ownerId", ${fields}, "createdAt", "updatedAt")
+         VALUES ($1, $2, ${values.map((_, index) => `$${index + 3}`).join(', ')}, NOW(), NOW())
+         ON CONFLICT ("ownerId") DO UPDATE SET ${assignments}, "updatedAt" = NOW()
+         RETURNING ${fields}`,
+        [crypto.randomUUID(), ownerId, ...values],
+      );
+      return sendJson(res, 200, rows[0]);
+    } catch (error) {
+      console.error('[Community Settings] Database error:', error.code || error.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to read or save community settings' });
     }
   }
 
@@ -950,18 +1331,35 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseBody(req);
       const content = String(body.content || '').trim();
-      if (!content) return sendJson(res, 400, { error: 'Comment content is required' });
-      const authorId = body.authorId || userId;
+      if (!content || content.length > 2000) {
+        return sendJson(res, 400, { error: 'Comment content must be between 1 and 2000 characters' });
+      }
+      if (isProduction) {
+        const [settings] = await dbQuery(
+          'SELECT "allowStudentComments" FROM "CommunitySettings" WHERE "ownerId" = $1 LIMIT 1',
+          [ownerId],
+        );
+        const teacherIds = (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim());
+        if (settings && !settings.allowStudentComments && !teacherIds.includes(userId)) {
+          return sendJson(res, 403, { error: 'Comments are disabled for students' });
+        }
+      }
+      const authorId = isProduction ? userId : (body.authorId || userId);
+      const authorName = String(body.authorName || (isProduction ? 'Learner' : '')).trim().slice(0, 80) || null;
+      const authorImageUrl = safeHttpsUrl(body.authorImageUrl);
       const rows = await dbQuery(
         `INSERT INTO "CommunityComment"
-           ("id", "content", "authorId", "authorName", "authorImageUrl", "postId", "createdAt")
-         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           ("id", "content", "authorId", "ownerId", "authorName", "authorImageUrl", "postId", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
          RETURNING "id", "content", "authorId", "authorName", "authorImageUrl", "postId", "createdAt"`,
-        [crypto.randomUUID(), content, authorId, body.authorName || null, body.authorImageUrl || null, postId],
+        [crypto.randomUUID(), content, authorId,
+          ownerId,
+          authorName,
+          authorImageUrl, postId],
       );
       return sendJson(res, 201, rows[0]);
     } catch (e) {
-      console.error('[Community Comments] DB error:', e.message);
+      console.error('[Community Comments] Database error:', e.code || e.name || 'unknown error');
       return sendJson(res, 500, { error: 'Unable to load or save community comment' });
     }
   }
@@ -971,7 +1369,7 @@ const server = http.createServer(async (req, res) => {
     const postId = decodeURIComponent(communityLikesMatch[1]);
     const ownerId = getCommunityOwnerId();
     const body = await parseBody(req);
-    const likedByUserId = body.userId || userId;
+    const likedByUserId = isProduction ? userId : (body.userId || userId);
     try {
       const post = await dbQuery(
         'SELECT "id" FROM "CommunityPost" WHERE "id" = $1 AND "ownerId" = $2',
@@ -1003,7 +1401,7 @@ const server = http.createServer(async (req, res) => {
         isLikedByMe: rows[0].isLikedByMe || false,
       });
     } catch (e) {
-      console.error('[Community Likes] DB error:', e.message);
+      console.error('[Community Likes] Database error:', e.code || e.name || 'unknown error');
       return sendJson(res, 500, { error: 'Unable to update community like' });
     }
   }
@@ -1011,8 +1409,8 @@ const server = http.createServer(async (req, res) => {
   // 15. Community Posts (GET & POST /api/community/posts)
   if (pathname === '/api/community/notifications' && method === 'GET') {
     const ownerId = getCommunityOwnerId();
-    const requestedUserId = typeof parsedUrl.query.userId === 'string'
-      ? parsedUrl.query.userId
+    const requestedUserId = !isProduction && typeof query.userId === 'string'
+      ? query.userId
       : userId;
     try {
       const notifications = await dbQuery(
@@ -1029,22 +1427,22 @@ const server = http.createServer(async (req, res) => {
       );
       return sendJson(res, 200, notifications);
     } catch (e) {
-      console.error('[Community Notifications] DB error:', e.message);
+      console.error('[Community Notifications] Database error:', e.code || e.name || 'unknown error');
       return sendJson(res, 500, { error: 'Unable to load community notifications' });
     }
   }
 
   if (pathname === '/api/community/posts' && method === 'GET') {
     try {
-      const spaceId = typeof parsedUrl.query.spaceId === 'string'
-        ? parsedUrl.query.spaceId
+      const spaceId = typeof query.spaceId === 'string'
+        ? query.spaceId
         : null;
-      const requestedUserId = typeof parsedUrl.query.userId === 'string'
-        ? parsedUrl.query.userId
+      const requestedUserId = !isProduction && typeof query.userId === 'string'
+        ? query.userId
         : userId;
       return sendJson(res, 200, await loadCommunityPostsFromDB(spaceId, requestedUserId));
     } catch (e) {
-      console.error('[Community Posts] DB error:', e.message);
+      console.error('[Community Posts] Database error:', e.code || e.name || 'unknown error');
       return sendJson(res, 500, { error: 'Unable to load community posts' });
     }
   }
@@ -1060,8 +1458,8 @@ const server = http.createServer(async (req, res) => {
       (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim()).includes(userId);
 
     if (!ownerId) return sendJson(res, 500, { error: 'Community owner is not configured' });
-    if (!spaceId || !title || !content) {
-      return sendJson(res, 400, { error: 'Space, title, and post content are required' });
+    if (!spaceId || !title || !content || title.length > 160 || content.length > 20000) {
+      return sendJson(res, 400, { error: 'Space and content are required; title must be under 160 characters and post under 20000 characters' });
     }
 
     try {
@@ -1081,13 +1479,15 @@ const server = http.createServer(async (req, res) => {
       }
 
       const isApproved = isTeacher || !communitySettings.requirePostApproval;
-      const authorName = String(body.authorName || `${author.firstName || ''} ${author.lastName || ''}`.trim() || 'Learner');
+      const authorName = String(body.authorName || `${author.firstName || ''} ${author.lastName || ''}`.trim() || 'Learner')
+        .trim().slice(0, 80);
+      const authorImageUrl = safeHttpsUrl(body.authorImageUrl) || (isProduction ? null : safeHttpsUrl(author.imageUrl));
       const rows = await dbQuery(
         `INSERT INTO "CommunityPost"
            ("id", "title", "content", "authorId", "ownerId", "spaceId", "isApproved", "createdAt", "updatedAt", "authorName", "authorImageUrl")
          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW(), $8, $9)
          RETURNING "id", "title", "content", "authorId", "ownerId", "spaceId", "isPinned", "isAnnouncement", "isApproved", "createdAt", "authorName", "authorImageUrl"`,
-        [crypto.randomUUID(), title, content, userId, ownerId, spaceId, isApproved, authorName, body.authorImageUrl || author.imageUrl || null],
+        [crypto.randomUUID(), title, content, userId, ownerId, spaceId, isApproved, authorName, authorImageUrl],
       );
       return sendJson(res, 201, {
         ...rows[0],
@@ -1097,32 +1497,163 @@ const server = http.createServer(async (req, res) => {
         commentsCount: 0,
       });
     } catch (e) {
-      console.error('[Community Posts] DB error while creating post:', e.message);
+      console.error('[Community Posts] Database error:', e.code || e.name || 'unknown error');
       return sendJson(res, 500, { error: 'Unable to create community post' });
     }
   }
 
-  // 16. LiveKit Meetings (GET /api/livekit/sessions, POST /api/livekit/token)
+  // LiveKit meeting sessions
   if (pathname === '/api/livekit/sessions' && method === 'GET') {
+    if (isProduction) {
+      try {
+        return sendJson(res, 200, await dbQuery(
+          `SELECT "id", "title", "description", "roomName", "hostId", "isActive", "createdAt"
+           FROM "MeetingSession" WHERE "isActive" = true ORDER BY "createdAt" DESC LIMIT 100`,
+        ));
+      } catch (error) {
+        console.error('[LiveKit Sessions] Database error:', error.code || error.name || 'unknown error');
+        return sendJson(res, 500, { error: 'Unable to load live sessions' });
+      }
+    }
     return sendJson(res, 200, liveSessions);
   }
 
-  if (pathname === '/api/livekit/token' && method === 'POST') {
+  if (pathname === '/api/livekit/sessions' && method === 'POST') {
+    if (!isProduction) return sendJson(res, 501, { error: 'Create meetings through the teacher dashboard' });
+    const teacherIds = (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim()).filter(Boolean);
+    if (!teacherIds.includes(userId)) return sendJson(res, 403, { error: 'Teacher access required' });
     const body = await parseBody(req);
-    const room = body.room || 'general-live';
-    const participant = body.username || userId;
+    const title = String(body.title || '').trim();
+    const description = String(body.description || '').trim();
+    if (!title || title.length > 160 || description.length > 2000) {
+      return sendJson(res, 400, { error: 'Meeting title is required and fields must be within the allowed length' });
+    }
+    const id = crypto.randomUUID();
+    const roomName = `termini-${crypto.randomUUID()}`;
+    try {
+      const rows = await dbQuery(
+        `INSERT INTO "MeetingSession" ("id", "title", "description", "roomName", "hostId", "isActive", "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, true, NOW(), NOW())
+         RETURNING "id", "title", "description", "roomName", "hostId", "isActive", "createdAt"`,
+        [id, title, description || null, roomName, userId],
+      );
+      return sendJson(res, 201, rows[0]);
+    } catch (error) {
+      console.error('[LiveKit Sessions] Database error:', error.code || error.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to create live session' });
+    }
+  }
+
+  const liveSessionMatch = pathname.match(/^\/api\/livekit\/sessions\/([^/]+)$/);
+  if (liveSessionMatch && method === 'DELETE') {
+    if (!isProduction) return sendJson(res, 501, { error: 'End meetings through the teacher dashboard' });
+    const teacherIds = (process.env.NEXT_PUBLIC_TEACHER_ID || '').split(',').map(id => id.trim()).filter(Boolean);
+    if (!teacherIds.includes(userId)) return sendJson(res, 403, { error: 'Teacher access required' });
+    try {
+      const rows = await dbQuery(
+        `UPDATE "MeetingSession" SET "isActive" = false, "updatedAt" = NOW()
+         WHERE "id" = $1 AND "hostId" = $2 AND "isActive" = true
+         RETURNING "id", "title", "description", "roomName", "hostId", "isActive", "createdAt"`,
+        [decodeURIComponent(liveSessionMatch[1]), userId],
+      );
+      if (!rows.length) return sendJson(res, 404, { error: 'Live session not found' });
+      return sendJson(res, 200, rows[0]);
+    } catch (error) {
+      console.error('[LiveKit Sessions] Database error:', error.code || error.name || 'unknown error');
+      return sendJson(res, 500, { error: 'Unable to end live session' });
+    }
+  }
+
+  if (pathname === '/api/livekit/token' && (method === 'GET' || method === 'POST')) {
+    const body = method === 'POST' ? await parseBody(req) : {};
+    const room = String(query.room || body.room || '').trim();
+    if (!room || room.length > 128) return sendJson(res, 400, { error: 'A valid room is required' });
+
+    if (isProduction) {
+      const apiKey = process.env.LIVEKIT_API_KEY;
+      const apiSecret = process.env.LIVEKIT_API_SECRET;
+      const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL;
+      if (!apiKey || !apiSecret || !wsUrl) {
+        return sendJson(res, 503, { error: 'Live meetings are not configured' });
+      }
+      try {
+        const sessions = await dbQuery(
+          `SELECT "hostId" FROM "MeetingSession" WHERE "roomName" = $1 AND "isActive" = true LIMIT 1`,
+          [room],
+        );
+        if (!sessions.length) return sendJson(res, 404, { error: 'Live session not found' });
+        const isHost = sessions[0].hostId === userId;
+        const accessToken = new AccessToken(apiKey, apiSecret, { identity: userId, name: userId });
+        accessToken.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
+        return sendJson(res, 200, {
+          token: await accessToken.toJwt(),
+          wsUrl,
+          room,
+          participantName: userId,
+          isHost,
+        });
+      } catch (error) {
+        console.error('[LiveKit Token] Token creation failed:', error.code || error.name || 'unknown error');
+        return sendJson(res, 500, { error: 'Unable to create live session token' });
+      }
+    }
+
     return sendJson(res, 200, {
-      token: `mock_livekit_jwt_token_${participant}_${room}_${Date.now()}`,
-      wsUrl: 'wss://livekit.example.com',
-      room: room,
+      token: `mock_livekit_jwt_token_${userId}_${room}_${Date.now()}`,
+      wsUrl: process.env.NEXT_PUBLIC_LIVEKIT_URL || 'wss://livekit.example.com',
+      room,
+      participantName: userId,
+      isHost: userId === 'teacher_admin_demo',
     });
   }
 
   // Fallback 404
   return sendJson(res, 404, { error: 'Not found', path: pathname });
-});
+}
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Termini LMS Server] Running at http://0.0.0.0:${PORT}`);
-  console.log(`[Termini LMS Server] Reverse adb forwarded to 127.0.0.1:${PORT}`);
+server.requestTimeout = 120000;
+server.headersTimeout = 15000;
+server.keepAliveTimeout = 5000;
+server.maxHeadersCount = 100;
+
+async function startServer() {
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error('PORT must be a valid TCP port');
+  }
+  if (!databaseUrl) throw new Error('DATABASE_URL or DIRECT_URL must be configured');
+  await dbQuery('SELECT 1');
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(PORT, '0.0.0.0', resolve);
+  });
+  console.log(`[Termini LMS Server] Listening on port ${PORT}`);
+  console.log('[DB] Connected to PostgreSQL successfully');
+}
+
+let isShuttingDown = false;
+async function shutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[Termini LMS Server] ${signal} received; shutting down`);
+  const forceExit = setTimeout(() => process.exit(1), 10000);
+  forceExit.unref();
+  server.close(async () => {
+    try {
+      await pool.end();
+      clearTimeout(forceExit);
+      process.exit(0);
+    } catch (_) {
+      process.exit(1);
+    }
+  });
+  if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+startServer().catch(async error => {
+  console.error('[Termini LMS Server] Startup failed:', error.code || error.name || 'configuration error');
+  await pool.end().catch(() => {});
+  process.exitCode = 1;
 });

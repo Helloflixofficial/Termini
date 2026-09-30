@@ -59,6 +59,12 @@ model CommunityPost {
   authorId       String
   ownerId        String
   spaceId        String
+  mediaUrl       String?
+  mediaType      String?
+  linkUrl        String?
+  linkTitle      String?
+  authorName     String?
+  authorImageUrl String?
   isPinned       Boolean            @default(false)
   isAnnouncement Boolean            @default(false)
   isApproved     Boolean            @default(true)
@@ -66,6 +72,7 @@ model CommunityPost {
   updatedAt      DateTime           @updatedAt
   space          CommunitySpace     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   comments       CommunityComment[]
+  likes          CommunityLike[]
 
   @@index([ownerId, createdAt])
   @@index([ownerId, isApproved, createdAt])
@@ -78,11 +85,26 @@ model CommunityComment {
   authorId  String
   ownerId   String
   postId    String
+  authorName     String?
+  authorImageUrl String?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
   post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
 
   @@index([ownerId, createdAt])
+  @@index([postId, createdAt])
+}
+
+model CommunityLike {
+  id        String        @id @default(uuid())
+  userId    String
+  ownerId   String
+  postId    String
+  createdAt DateTime      @default(now())
+  post      CommunityPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@index([ownerId, postId])
   @@index([postId, createdAt])
 }
 

@@ -152,17 +152,29 @@ The Android emulator can reach the backend using the built-in `10.0.2.2` default
 
 ### Step 2 — Start the Backend Server
 
-The backend uses a **custom Node.js server** (`server.js`), NOT `npm run dev`.
+For local development, start the custom API server with demo sign-in and sample fallbacks enabled:
 
 ```bash
-# From inside backend_repo/
-node server.js
+# From backend_repo/
+npm run dev:api
 ```
+
+Wait for the server's database health check before opening the app. It listens on port 3000 and prints a successful database connection message only after PostgreSQL responds.
+
+For a production deployment, set real credentials and the production browser origin allowlist (`CORS_ORIGINS`), then run:
+
+```bash
+npm run start:api
+```
+
+Production mode verifies Clerk session tokens, rejects demo sign-in, and requires an active database connection before listening. Do not expose the development server (`npm run dev:api`) to the public internet.
+
+The health endpoint is `/healthz`; it returns a successful status only when the database is reachable.
 
 You should see:
 ```
-[Termini LMS Server] Running at http://0.0.0.0:3000
-[DB] Connected to Neon PostgreSQL successfully!
+[Termini LMS Server] Listening on port 3000
+[DB] Connected to PostgreSQL successfully
 ```
 
 > ⚠️ **Keep this terminal open.** The server must stay running while you use the app.
