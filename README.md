@@ -1,5 +1,7 @@
 # Termini LMS – Multiplatform Flutter Learning Platform
 
+Deployment and security readiness plan: [DEPLOYMENT_PLAN.md](./DEPLOYMENT_PLAN.md).
+
 A production-quality, multiplatform Flutter application that is a 100% functional and visual clone of [OEPlatform](https://github.com/Helloflixofficial/OEPlatform.git) — a modern Learning Management System (LMS) built with Next.js, Clerk authentication, Neon Postgres via Prisma, Stripe checkout, Mux video streaming, UploadThing file attachments, and LiveKit WebRTC interactive live classrooms.
 
 **Targets**: Android, iOS, Web, Windows, macOS, Linux from a single unified codebase.
@@ -66,6 +68,8 @@ Minor RESTful adjustments made to the backend are documented in detail in [`BACK
 ## Configuration & Environment Variables
 
 Configure application settings at build/run time using `--dart-define` flags. The root `.env.example` is a reference template; Flutter does not automatically load it. Never put backend secret keys in Flutter `--dart-define` values.
+
+All values passed with `--dart-define` are packaged into the app and must be treated as public. Keep database URLs, Clerk secret keys, Stripe secret keys, Mux tokens, UploadThing secrets, LiveKit API secrets, and Android signing passwords out of Flutter builds.
 
 | Variable | Default Value | Description |
 |---|---|---|

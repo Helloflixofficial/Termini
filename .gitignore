@@ -71,9 +71,19 @@ backend_repo/.next/
 .env
 .env.local
 .env*.local
+.env.*
+!.env.example
 backend_repo/.env
 backend_repo/.env*
 !backend_repo/.env.example
+
+# Deployment credentials and local Vercel project links
+*.jks
+*.keystore
+key.properties
+android/key.properties
+.vercel/
+backend_repo/.vercel/
 
 
 # App branding assets
