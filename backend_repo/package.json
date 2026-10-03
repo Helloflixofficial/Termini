@@ -51,7 +51,7 @@
     "livekit-server-sdk": "^2.17.0",
     "lucide-react": "^0.279.0",
     "next": "^14.2.5",
-    "next-nprogress-bar": "^2.1.2",
+    "next-nprogress-bar": "^2.4.7",
     "pg": "^8.12.0",
     "postcss": "^8.4.40",
     "query-string": "^8.2.0",
