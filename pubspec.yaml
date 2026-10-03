@@ -42,7 +42,7 @@ dependencies:
 
   # UI Components, Formats, Utilities
   cached_network_image: ^3.4.1
-  shimmer: ^3.0.0
+  shimmer: ^4.0.0
   intl: ^0.20.2
   url_launcher: ^6.3.1
   flutter_markdown: ^0.7.6+1
