@@ -23,7 +23,7 @@
     "@livekit/components-react": "^2.9.23",
     "@livekit/components-styles": "^1.2.0",
     "@mux/mux-node": "^7.3.2",
-    "@mux/mux-player-react": "^1.14.2",
+    "@mux/mux-player-react": "^3.13.4",
     "@prisma/client": "^5.17.0",
     "@radix-ui/react-alert-dialog": "^1.0.5",
     "@radix-ui/react-checkbox": "^1.0.4",
