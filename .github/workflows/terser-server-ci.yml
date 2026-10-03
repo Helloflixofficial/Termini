@@ -1,0 +1,49 @@
+name: Termini API CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terserServer/**"
+      - ".github/workflows/terser-server-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "terserServer/**"
+      - ".github/workflows/terser-server-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: termini-api-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Type-check and build Vercel API
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: terserServer
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: terserServer/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build Next.js API
+        run: npm run build

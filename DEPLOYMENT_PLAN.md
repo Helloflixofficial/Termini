@@ -6,7 +6,8 @@ This repository contains a Flutter client at the repository root and a Next.js a
 
 - The Flutter Android CI workflow builds a debug APK on pushes and pull requests to `main` and saves it as a short-lived GitHub Actions artifact.
 - A protected Android release workflow is prepared to build a signed APK and Play Store app bundle from a version tag such as `v1.0.0` or a manual run on `main`.
-- Vercel is **not ready for the Flutter app's complete API** yet. `server.js` creates a long-lived `http.Server`, calls `listen()`, and owns routes the Flutter app uses. Vercel's Next.js deployment handles the Next.js app and its route handlers; it does not run this custom listening server as the application's server. Some Next.js route handlers already exist, but endpoint behavior must be reconciled with the mobile API before switching the app over.
+- A separate Vercel-native TypeScript API has been created at `terserServer/`. It uses Next.js App Router function routes, Prisma, Clerk JWT verification, and matches the Flutter API paths. Its production build and TypeScript checks pass locally. Follow [`terserServer/README.md`](./terserServer/README.md) for setup, environment variables, and deployment.
+- The Vercel project is **not deployed or production-ready yet**. Provider credentials still need to be configured, production migrations reviewed/applied, and the existing public Mux playback IDs migrated to signed playback before cutover. The old `backend_repo/server.js` is unchanged.
 - Nothing in this setup deploys to Vercel or publishes to Google Play automatically.
 
 ## Recommended deployment sequence
@@ -20,43 +21,23 @@ The tracked diagnostics `backend_repo/test_db.js` and `backend_repo/test_videos.
 3. Do not paste the URL into chat, source files, issues, workflow logs, or GitHub Actions variables.
 4. If those commits are on a public remote, removing the old value from a new commit does not erase it from history. History cleanup is a separate, coordinated operation and does not replace rotating the password.
 
-### 2. Make the API compatible with Vercel
+### 2. Prepare and secure the new API
 
-Before pointing the Flutter app at Vercel:
+The Vercel-compatible API is in `terserServer/`; use its [deployment guide](./terserServer/README.md) as the operational checklist. Before production cutover, rotate the exposed database password, apply reviewed Prisma migrations, configure Clerk/provider secrets, migrate old public Mux playback IDs to signed IDs, and verify Flutter requests against a Vercel Preview. Keep the original `backend_repo/server.js` available for rollback until that Preview passes.
 
-1. Inventory the route and response behavior in `backend_repo/server.js` against every path in `lib/core/config/api_constants.dart` and the Flutter repositories.
-2. Move the mobile API routes into Next.js App Router handlers under `backend_repo/app/api/**/route.ts`, keeping request/response formats compatible.
-3. Apply Clerk token verification and teacher authorization in each protected route. Production must reject demo identities and caller-supplied user IDs.
-4. Preserve Stripe webhook signature verification, Mux playback authorization, upload authorization, and LiveKit token authorization during the migration.
-5. Remove process-lifetime assumptions from API behavior: the in-memory access cache is per server process and cannot be treated as shared state. Keep durable state in PostgreSQL or another shared service.
-6. Use Neon pooled connections for function traffic, keep migrations on the direct URL, and set conservative connection limits so function scaling cannot exhaust the database.
-7. Set exact allowed browser origins. Do not use wildcard CORS with credentials.
-8. Add route-level health and readiness checks, rate limits for authentication and write routes, and request validation before production cutover.
-9. Verify mobile endpoint parity against a Vercel preview before changing the production app URL.
+#### Route parity in the new server
 
-Until those steps are complete, keep the current `server.js` on a host that supports a persistent Node.js server, or complete the route migration before making Vercel the mobile API host.
+The `terserServer/app/api` route handlers include the Flutter-facing profile, dashboard, course, teacher, community, LiveKit, video, and health paths. Sign-in/up API calls explicitly return `410`: production identity is handled by Clerk, and demo sign-in is disabled.
 
-#### Route parity found in this repository
+Before switching Flutter from the old server to Vercel, complete the operational rollout steps in `terserServer/README.md`:
 
-I compared the Flutter repositories with the Next.js `app/api` route handlers. The Next.js app already has handlers for the dashboard, categories, most course/chapter/attachment operations, teacher data, community feeds/posts/settings, and LiveKit sessions/tokens. Similar route names alone do not prove that response shapes or authorization match the Flutter client.
-
-These current Flutter/API-server paths still need explicit migration or a deliberate client change before Vercel can replace `server.js`:
-
-| Path and method | Current gap |
-| --- | --- |
-| `GET`, `PUT /api/user/profile` | Used by Flutter; no corresponding Next.js route handler found. |
-| `GET /api/community/notifications` | Used by Flutter; no corresponding Next.js route handler found. |
-| `GET /api/community/posts/:postId/comments` | Flutter fetches comments; the Next.js handler currently exports `POST` only. |
-| `POST /api/community/posts/:postId/likes` | Used by Flutter; no corresponding Next.js route handler found. |
-| `GET /api/videos/:id` (`GET`/`HEAD`) | Custom server has a streaming route; no corresponding Next.js route handler found. Confirm whether the app still depends on it before retiring it. |
-| `GET /healthz` | Custom-server health endpoint; add a function-compatible readiness endpoint for Vercel monitoring. |
-| `POST /api/auth/sign-in`, `POST /api/auth/sign-up` | Flutter still declares these paths. The custom server rejects them in production; keep Clerk as the production identity provider and remove or replace any demo-auth dependency rather than exposing demo auth on Vercel. |
-
-The route list comes from `lib/features/**/data/*_repository.dart`, `lib/core/config/api_constants.dart`, `backend_repo/server.js`, and `backend_repo/app/api/**/route.ts`. Close these gaps and verify request/response parity in a Vercel preview before changing the production mobile API URL.
+- Configure Vercel and provider environments, apply the reviewed database migrations, and run the Mux signed-playback migration before deploying paid video.
+- The user’s Flutter app must send a real Clerk session JWT. Demo/offline identities are not accepted by `terserServer`.
+- Deploy a Preview and verify app endpoint behavior before changing the production API URL.
 
 ### 3. Configure the Vercel project
 
-Create/import the GitHub project in Vercel with `backend_repo` as its **Root Directory** and the Next.js framework preset. Let Vercel use the detected Next.js build settings. Connect Git through Vercel so pull requests receive preview deployments and production deploys follow the selected production branch. Keep the Vercel project private until the production environment and Clerk application domains are configured.
+Create/import the GitHub project in Vercel with `terserServer` as its **Root Directory** and the Next.js framework preset. Let Vercel use the detected Next.js build settings. Connect Git through Vercel so pull requests receive preview deployments and production deploys follow the selected production branch. Keep the Vercel project private until the production environment and Clerk application domains are configured.
 
 Set backend values in Vercel's environment settings, separately for Preview and Production:
 
@@ -64,15 +45,13 @@ Set backend values in Vercel's environment settings, separately for Preview and 
 | --- | --- |
 | `DATABASE_URL` | Neon pooled connection URL |
 | `DIRECT_URL` | Neon direct connection URL for Prisma operations |
-| `CLERK_SECRET_KEY` | Secret |
-| `MUX_TOKEN_ID`, `MUX_TOKEN_SECRET` | Server-side Mux credentials |
+| `CLERK_SECRET_KEY`, `CLERK_JWT_ISSUER` | Secret and exact issuer for JWT verification |
+| `TEACHER_IDS` | Server-only Clerk teacher/admin IDs |
+| `MUX_TOKEN_ID`, `MUX_TOKEN_SECRET`, `MUX_SIGNING_KEY_ID`, `MUX_PRIVATE_KEY` | Server-side Mux API/signing credentials |
 | `UPLOADTHING_APP_ID`, `UPLOADTHING_SECRET` | UploadThing settings; keep the secret private |
 | `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET` | Secret; use matching live/test mode per environment |
-| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Secret |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Public browser key; use the matching Clerk instance |
-| `NEXT_PUBLIC_LIVEKIT_URL` | Public LiveKit endpoint |
-| `NEXT_PUBLIC_APP_URL` | Public HTTPS Vercel/custom domain |
-| `NEXT_PUBLIC_TEACHER_ID` | Public Clerk user ID list used by current code; not a credential |
+| `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_URL` | Server-side LiveKit credentials and public websocket endpoint |
+| `APP_BASE_URL` | HTTPS API origin used for Stripe return pages |
 | `CORS_ORIGINS` | Exact browser origins, comma-separated; no paths or trailing slash |
 
 Never use a `NEXT_PUBLIC_` variable for a password or API secret: Next.js exposes those values to browser code. Apply Prisma migrations deliberately from a controlled release step using the direct database URL; do not run schema-changing commands on every function cold start.

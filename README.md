@@ -2,6 +2,8 @@
 
 Deployment and security readiness plan: [DEPLOYMENT_PLAN.md](./DEPLOYMENT_PLAN.md).
 
+Standalone Vercel API project and setup guide: [terserServer/README.md](./terserServer/README.md).
+
 A production-quality, multiplatform Flutter application that is a 100% functional and visual clone of [OEPlatform](https://github.com/Helloflixofficial/OEPlatform.git) — a modern Learning Management System (LMS) built with Next.js, Clerk authentication, Neon Postgres via Prisma, Stripe checkout, Mux video streaming, UploadThing file attachments, and LiveKit WebRTC interactive live classrooms.
 
 **Targets**: Android, iOS, Web, Windows, macOS, Linux from a single unified codebase.

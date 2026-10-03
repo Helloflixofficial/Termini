@@ -5,6 +5,7 @@ import 'package:video_player/video_player.dart';
 class MuxVideoPlayer extends StatefulWidget {
   final String? chapterId;
   final String? playbackId;
+  final String? playbackToken;
   final String? fallbackVideoUrl;
   final VoidCallback? onVideoEnd;
 
@@ -12,6 +13,7 @@ class MuxVideoPlayer extends StatefulWidget {
     super.key,
     this.chapterId,
     this.playbackId,
+    this.playbackToken,
     this.fallbackVideoUrl,
     this.onVideoEnd,
   });
@@ -38,6 +40,7 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chapterId != widget.chapterId ||
         oldWidget.playbackId != widget.playbackId ||
+        oldWidget.playbackToken != widget.playbackToken ||
         oldWidget.fallbackVideoUrl != widget.fallbackVideoUrl) {
       _disposePlayer();
       _initializePlayer();
@@ -62,7 +65,12 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
     // Use Mux HLS if the direct upload is missing or cannot be played.
     final muxPlaybackId = widget.playbackId?.trim();
     if (muxPlaybackId != null && muxPlaybackId.isNotEmpty) {
-      final muxUrl = 'https://stream.mux.com/$muxPlaybackId.m3u8';
+      final token = widget.playbackToken?.trim();
+      final muxUrl = Uri.https(
+        'stream.mux.com',
+        '/$muxPlaybackId.m3u8',
+        token != null && token.isNotEmpty ? {'token': token} : null,
+      ).toString();
       final success = await _tryInitialize(muxUrl);
       if (success) return;
     }

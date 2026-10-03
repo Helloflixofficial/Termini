@@ -186,6 +186,7 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
           final hasAccess = isFree || isPurchased;
 
           final muxPlaybackId = data['muxData']?['playbackId'] as String?;
+          final muxPlaybackToken = data['muxData']?['playbackToken'] as String?;
           final nextChapter = data['nextChapter'] != null
               ? ChapterEntity.fromJson(
                   data['nextChapter'] as Map<String, dynamic>,
@@ -218,6 +219,7 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
                   MuxVideoPlayer(
                     chapterId: chapter.id,
                     playbackId: muxPlaybackId,
+                    playbackToken: muxPlaybackToken,
                     fallbackVideoUrl: chapter.videoUrl,
                     onVideoEnd: () {
                       if (!isCompleted) _handleProgressToggle(false);
