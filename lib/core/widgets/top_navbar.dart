@@ -131,9 +131,12 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
 
     final sidebarBg = isDark ? const Color(0xFF131720) : Colors.white;
 
-    return FadeTransition(
-      opacity: _fadeAnim,
-      child: Container(
+    return SafeArea(
+      top: true,
+      bottom: false,
+      child: FadeTransition(
+        opacity: _fadeAnim,
+        child: Container(
         height: widget.preferredSize.height,
         decoration: BoxDecoration(
           color: sidebarBg,
@@ -517,6 +520,7 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
               ),
             ),
           ],
+        ),
         ),
       ),
     );

@@ -39,11 +39,17 @@ class ResponsiveLayout extends ConsumerWidget {
     final colorScheme = theme.colorScheme;
 
     if (screenType == ScreenType.compact) {
+      final topNavbar = TopNavbar(
+        title: title,
+        showSearch: showSearch,
+        actions: actions,
+      );
       return Scaffold(
-        appBar: TopNavbar(
-          title: title,
-          showSearch: showSearch,
-          actions: actions,
+        appBar: PreferredSize(
+          preferredSize: Size.fromHeight(
+            topNavbar.preferredSize.height + MediaQuery.paddingOf(context).top,
+          ),
+          child: topNavbar,
         ),
         drawer: Drawer(
           child: SafeArea(
