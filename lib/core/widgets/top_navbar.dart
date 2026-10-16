@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/auth/presentation/auth_controller.dart';
+import '../../features/auth/domain/user_entity.dart';
 import '../../features/community/data/community_local_notification_service.dart';
 import '../../features/community/presentation/community_notifications_screen.dart';
-import '../theme/theme_provider.dart';
 import '../utils/breakpoints.dart';
 
 class TopNavbar extends ConsumerStatefulWidget implements PreferredSizeWidget {
@@ -37,8 +38,12 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   Timer? _notificationRefreshTimer;
+  StreamSubscription<RemoteMessage>? _foregroundPushSubscription;
+  StreamSubscription<RemoteMessage>? _openedPushSubscription;
+  StreamSubscription<String>? _pushTokenRefreshSubscription;
   late final Future<void> _notificationSetup;
-  bool _avatarHovered = false;
+  bool _firebasePushReady = false;
+  String? _notificationUserId;
   bool _searchHovered = false;
 
   @override
@@ -58,9 +63,10 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
   }
 
   Future<void> _prepareCommunityNotifications() async {
-    await CommunityLocalNotificationService.initialize();
     final user = ref.read(currentUserProvider);
+    await _configurePushForUser(user);
     if (user == null || user.isTeacher != false) return;
+
     try {
       final posts = await ref.read(communityNotificationPostsProvider.future);
       await CommunityLocalNotificationService.rememberCurrentPosts(
@@ -72,17 +78,120 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
     }
   }
 
+  Future<void> _configurePushForUser(UserEntity? user) async {
+    if (_notificationUserId == user?.id) return;
+    _notificationUserId = user?.id;
+    await _foregroundPushSubscription?.cancel();
+    await _openedPushSubscription?.cancel();
+    await _pushTokenRefreshSubscription?.cancel();
+    _foregroundPushSubscription = null;
+    _openedPushSubscription = null;
+    _pushTokenRefreshSubscription = null;
+    _firebasePushReady = false;
+
+    if (user == null || user.isTeacher != false) {
+      try {
+        await FirebaseMessaging.instance.unsubscribeFromTopic(
+          'community_students',
+        );
+      } catch (_) {
+        // Firebase may not be configured on this installation yet.
+      }
+      return;
+    }
+
+    try {
+      final messaging = FirebaseMessaging.instance;
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+      final prefs = await SharedPreferences.getInstance();
+      const tokenRefreshKey = 'community_push_token_refresh_v1';
+      if (!(prefs.getBool(tokenRefreshKey) ?? false)) {
+        // Refresh any registration created before the production sender was
+        // configured. Firebase can leave an invalid token cached locally.
+        await messaging.deleteToken();
+      }
+      final token = await messaging.getToken();
+      if (token == null || token.isEmpty) {
+        throw StateError('Firebase did not provide a registration token');
+      }
+      final communityEnabled =
+          prefs.getBool('community_notifications_enabled_${user.id}') ?? true;
+      if (communityEnabled) {
+        await messaging.subscribeToTopic('community_students');
+      } else {
+        await messaging.unsubscribeFromTopic('community_students');
+      }
+      await prefs.setBool(tokenRefreshKey, true);
+      _pushTokenRefreshSubscription = messaging.onTokenRefresh.listen((_) {
+        unawaited(() async {
+          final latestPrefs = await SharedPreferences.getInstance();
+          if (latestPrefs.getBool(
+                'community_notifications_enabled_${user.id}',
+              ) ??
+              true) {
+            await messaging.subscribeToTopic('community_students');
+          } else {
+            await messaging.unsubscribeFromTopic('community_students');
+          }
+        }());
+      });
+      _firebasePushReady = true;
+      _foregroundPushSubscription = FirebaseMessaging.onMessage.listen((
+        message,
+      ) {
+        final notification = message.notification;
+        final postId =
+            message.data['postId']?.toString() ??
+            DateTime.now().microsecondsSinceEpoch.toString();
+        unawaited(
+          CommunityLocalNotificationService.showNotification(
+            id: postId,
+            title: notification?.title ?? 'New post from Termini',
+            body:
+                notification?.body ??
+                'A teacher shared a new post in Community.',
+            userId: user.id,
+          ),
+        );
+        unawaited(_refreshCommunityNotifications());
+      });
+      _openedPushSubscription = FirebaseMessaging.onMessageOpenedApp.listen(
+        (_) => _openCommunityNotifications(),
+      );
+      if (await messaging.getInitialMessage() != null && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _openCommunityNotifications();
+        });
+      }
+    } catch (error) {
+      // Foreground polling remains available until Firebase app setup is present.
+      debugPrint('[Termini Push] Firebase messaging unavailable: $error');
+      await CommunityLocalNotificationService.initialize();
+    }
+  }
+
+  void _openCommunityNotifications() {
+    if (mounted) context.push('/notifications');
+  }
+
   Future<void> _refreshCommunityNotifications() async {
     if (!mounted) return;
     final user = ref.read(currentUserProvider);
     if (user == null || user.isTeacher != false) return;
     await _notificationSetup;
+    if (_notificationUserId != user.id) {
+      await _configurePushForUser(user);
+    }
     if (!mounted) return;
     ref.invalidate(communityNotificationPostsProvider);
     ref.invalidate(communityUnreadCountProvider);
     try {
       final posts = await ref.read(communityNotificationPostsProvider.future);
-      await CommunityLocalNotificationService.notifyForNewPosts(user.id, posts);
+      await CommunityLocalNotificationService.notifyForNewPosts(
+        user.id,
+        posts,
+        showNotifications: !_firebasePushReady,
+      );
     } catch (_) {
       // The next timer tick retries if the backend is temporarily unavailable.
     }
@@ -92,6 +201,9 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
   void dispose() {
     _animController.dispose();
     _notificationRefreshTimer?.cancel();
+    _foregroundPushSubscription?.cancel();
+    _openedPushSubscription?.cancel();
+    _pushTokenRefreshSubscription?.cancel();
     super.dispose();
   }
 
@@ -113,6 +225,11 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (previous?.id != next?.id) {
+        unawaited(_configurePushForUser(next));
+      }
+    });
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
@@ -123,12 +240,6 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
         ? 0
         : ref.watch(communityUnreadCountProvider).valueOrNull ?? 0;
 
-    final initials = currentUser?.firstName?.isNotEmpty == true
-        ? currentUser!.firstName![0].toUpperCase()
-        : (currentUser?.email.isNotEmpty == true
-              ? currentUser!.email[0].toUpperCase()
-              : 'U');
-
     final sidebarBg = isDark ? const Color(0xFF131720) : Colors.white;
 
     return SafeArea(
@@ -137,390 +248,244 @@ class _TopNavbarState extends ConsumerState<TopNavbar>
       child: FadeTransition(
         opacity: _fadeAnim,
         child: Container(
-        height: widget.preferredSize.height,
-        decoration: BoxDecoration(
-          color: sidebarBg,
-          border: Border(
-            bottom: BorderSide(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.07)
-                  : Colors.black.withValues(alpha: 0.07),
-              width: 1,
+          height: widget.preferredSize.height,
+          decoration: BoxDecoration(
+            color: sidebarBg,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : Colors.black.withValues(alpha: 0.07),
+                width: 1,
+              ),
             ),
+            boxShadow: [
+              BoxShadow(
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.25)
+                    : Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: isDark
-                  ? Colors.black.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        padding: EdgeInsets.symmetric(horizontal: isCompact ? 12 : 20),
-        child: Row(
-          children: [
-            // Hamburger
-            if (isCompact) ...[
-              _iconBtn(
-                icon: Icons.menu_rounded,
-                isDark: isDark,
-                colorScheme: colorScheme,
-                onTap: () => Scaffold.of(context).openDrawer(),
-              ),
-              const SizedBox(width: 10),
-            ],
-
-            // Title / Greeting
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (!isCompact && currentUser != null) ...[
-                    RichText(
-                      text: TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '$_greeting ',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                          TextSpan(
-                            text: _greetingEmoji,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      currentUser.firstName?.isNotEmpty == true
-                          ? currentUser.firstName!
-                          : widget.title,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                        fontSize: 16,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ] else ...[
-                    Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                        fontSize: 17,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-
-            // Search (non-compact)
-            if (widget.showSearch && !isCompact) ...[
-              const SizedBox(width: 16),
-              MouseRegion(
-                onEnter: (_) => setState(() => _searchHovered = true),
-                onExit: (_) => setState(() => _searchHovered = false),
-                child: GestureDetector(
-                  onTap: widget.onSearchTap ?? () => context.go('/search'),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: _searchHovered ? 300 : 260,
-                    height: 40,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    decoration: BoxDecoration(
-                      color: _searchHovered
-                          ? (isDark
-                                ? Colors.white.withValues(alpha: 0.07)
-                                : Colors.black.withValues(alpha: 0.04))
-                          : (isDark
-                                ? Colors.white.withValues(alpha: 0.04)
-                                : Colors.black.withValues(alpha: 0.02)),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _searchHovered
-                            ? colorScheme.primary.withValues(alpha: 0.4)
-                            : isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.black.withValues(alpha: 0.1),
-                        width: 1.2,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: 17,
-                          color: _searchHovered
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 9),
-                        Expanded(
-                          child: Text(
-                            'Search courses, topics...',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w400,
-                              color: colorScheme.onSurfaceVariant.withValues(
-                                alpha: 0.7,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.07)
-                                : Colors.black.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(5),
-                          ),
-                          child: Text(
-                            '⌘K',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+          padding: EdgeInsets.symmetric(horizontal: isCompact ? 12 : 20),
+          child: Row(
+            children: [
+              // Hamburger
+              if (isCompact) ...[
+                _iconBtn(
+                  icon: Icons.menu_rounded,
+                  isDark: isDark,
+                  colorScheme: colorScheme,
+                  onTap: () => Scaffold.of(context).openDrawer(),
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+              ],
 
-            const SizedBox(width: 6),
-            ...?widget.actions,
-
-            // Theme toggle
-            const ThemeToggleButton(),
-            const SizedBox(width: 8),
-
-            // User avatar button
-            MouseRegion(
-              onEnter: (_) => setState(() => _avatarHovered = true),
-              onExit: (_) => setState(() => _avatarHovered = false),
-              child: GestureDetector(
-                onTap: () => context.go('/profile'),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _avatarHovered
-                        ? colorScheme.primary.withValues(alpha: 0.08)
-                        : isDark
-                        ? Colors.white.withValues(alpha: 0.04)
-                        : Colors.black.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _avatarHovered
-                          ? colorScheme.primary.withValues(alpha: 0.25)
-                          : isDark
-                          ? Colors.white.withValues(alpha: 0.08)
-                          : Colors.black.withValues(alpha: 0.08),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Avatar circle
-                      Stack(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: currentUser?.imageUrl == null
-                                  ? LinearGradient(
-                                      colors: canTeach
-                                          ? [
-                                              const Color(0xFF8B5CF6),
-                                              const Color(0xFF6366F1),
-                                            ]
-                                          : [
-                                              const Color(0xFF0284C7),
-                                              const Color(0xFF38BDF8),
-                                            ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    )
-                                  : null,
-                              boxShadow: [
-                                BoxShadow(
-                                  color:
-                                      (canTeach
-                                              ? const Color(0xFF8B5CF6)
-                                              : const Color(0xFF0284C7))
-                                          .withValues(alpha: 0.35),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                            ),
-                            child: currentUser?.imageUrl != null
-                                ? ClipOval(
-                                    child: CachedNetworkImage(
-                                      imageUrl: currentUser!.imageUrl!,
-                                      width: 32,
-                                      height: 32,
-                                      memCacheWidth: 96,
-                                      memCacheHeight: 96,
-                                      fit: BoxFit.cover,
-                                      errorWidget: (_, _, _) => Center(
-                                        child: Text(
-                                          initials,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                : Center(
-                                    child: Text(
-                                      initials,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                          ),
-                          // Online dot
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: Container(
-                              width: 9,
-                              height: 9,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF10B981),
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: sidebarBg,
-                                  width: 1.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                          if (unreadCount > 0)
-                            Positioned(
-                              top: -3,
-                              right: -4,
-                              child: Tooltip(
-                                message: 'Community notifications',
-                                child: Material(
-                                  color: const Color(0xFFEF4444),
-                                  shape: const CircleBorder(),
-                                  child: InkWell(
-                                    customBorder: const CircleBorder(),
-                                    onTap: () => context.push('/notifications'),
-                                    child: Container(
-                                      width: 19,
-                                      height: 19,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: sidebarBg,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      child: const Icon(
-                                        Icons.notifications_rounded,
-                                        color: Colors.white,
-                                        size: 10,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      if (!isCompact) ...[
-                        const SizedBox(width: 8),
-                        Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
+              // Title / Greeting
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!isCompact && currentUser != null) ...[
+                      RichText(
+                        text: TextSpan(
                           children: [
-                            Text(
-                              currentUser?.firstName?.isNotEmpty == true
-                                  ? currentUser!.firstName!
-                                  : 'User',
+                            TextSpan(
+                              text: '$_greeting ',
                               style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: isDark
-                                    ? Colors.white
-                                    : const Color(0xFF0F172A),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: colorScheme.onSurfaceVariant,
                               ),
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 5,
-                                vertical: 1,
-                              ),
-                              decoration: BoxDecoration(
-                                color:
-                                    (canTeach
-                                            ? const Color(0xFF8B5CF6)
-                                            : const Color(0xFF0284C7))
-                                        .withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                canTeach ? 'INSTRUCTOR' : 'STUDENT',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.5,
-                                  color: canTeach
-                                      ? const Color(0xFFA78BFA)
-                                      : const Color(0xFF38BDF8),
-                                ),
-                              ),
+                            TextSpan(
+                              text: _greetingEmoji,
+                              style: const TextStyle(fontSize: 11),
                             ),
                           ],
                         ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          size: 16,
-                          color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        currentUser.firstName?.isNotEmpty == true
+                            ? currentUser.firstName!
+                            : widget.title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                          fontSize: 16,
+                          color: isDark
+                              ? Colors.white
+                              : const Color(0xFF0F172A),
                         ),
-                      ],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ] else ...[
+                      Text(
+                        widget.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                          fontSize: 17,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              // Search (non-compact)
+              if (widget.showSearch && !isCompact) ...[
+                const SizedBox(width: 16),
+                MouseRegion(
+                  onEnter: (_) => setState(() => _searchHovered = true),
+                  onExit: (_) => setState(() => _searchHovered = false),
+                  child: GestureDetector(
+                    onTap: widget.onSearchTap ?? () => context.go('/search'),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: _searchHovered ? 300 : 260,
+                      height: 40,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: _searchHovered
+                            ? (isDark
+                                  ? Colors.white.withValues(alpha: 0.07)
+                                  : Colors.black.withValues(alpha: 0.04))
+                            : (isDark
+                                  ? Colors.white.withValues(alpha: 0.04)
+                                  : Colors.black.withValues(alpha: 0.02)),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _searchHovered
+                              ? colorScheme.primary.withValues(alpha: 0.4)
+                              : isDark
+                              ? Colors.white.withValues(alpha: 0.1)
+                              : Colors.black.withValues(alpha: 0.1),
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.search_rounded,
+                            size: 17,
+                            color: _searchHovered
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 9),
+                          Expanded(
+                            child: Text(
+                              'Search courses, topics...',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w400,
+                                color: colorScheme.onSurfaceVariant.withValues(
+                                  alpha: 0.7,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.07)
+                                  : Colors.black.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text(
+                              '⌘K',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(width: 6),
+              ...?widget.actions,
+
+              const SizedBox(width: 4),
+
+              // Notifications
+              Tooltip(
+                message: unreadCount > 0
+                    ? 'Notifications ($unreadCount unread)'
+                    : 'Notifications',
+                child: IconButton(
+                  onPressed: _openCommunityNotifications,
+                  style: IconButton.styleFrom(
+                    fixedSize: const Size(42, 42),
+                    backgroundColor: unreadCount > 0
+                        ? const Color(0xFFEF4444).withValues(alpha: 0.10)
+                        : (isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.04)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                  ),
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(
+                        Icons.notifications_rounded,
+                        size: 22,
+                        color: unreadCount > 0
+                            ? const Color(0xFFEF4444)
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                      if (unreadCount > 0)
+                        Positioned(
+                          top: -8,
+                          right: -9,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: sidebarBg, width: 1.5),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              unreadCount > 9 ? '9+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
         ),
       ),
     );

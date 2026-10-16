@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/breakpoints.dart';
 import '../../../core/widgets/empty_state.dart';
@@ -8,7 +9,7 @@ import '../../../core/widgets/responsive_layout.dart';
 import '../../courses/data/course_repository.dart';
 import '../../courses/domain/course_entity.dart';
 import '../../player/presentation/chapter_player_screen.dart';
-import '../../player/presentation/widgets/mux_video_player.dart';
+import '../../player/presentation/widgets/uploadthing_video_player.dart';
 
 class ChapterEditorScreen extends ConsumerStatefulWidget {
   final String courseId;
@@ -21,7 +22,8 @@ class ChapterEditorScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ChapterEditorScreen> createState() => _ChapterEditorScreenState();
+  ConsumerState<ChapterEditorScreen> createState() =>
+      _ChapterEditorScreenState();
 }
 
 class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
@@ -36,18 +38,28 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
       } else {
         await repo.publishChapter(widget.courseId, widget.chapterId);
       }
-      ref.invalidate(chapterDetailsProvider((courseId: widget.courseId, chapterId: widget.chapterId)));
+      ref.invalidate(
+        chapterDetailsProvider((
+          courseId: widget.courseId,
+          chapterId: widget.chapterId,
+        )),
+      );
       ref.invalidate(courseDetailsProvider(widget.courseId));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(chapter.isPublished ? 'Chapter unpublished' : 'Chapter published!')),
+          SnackBar(
+            content: Text(
+              chapter.isPublished
+                  ? 'Chapter unpublished'
+                  : 'Chapter published!',
+            ),
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Action failed: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Action failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -59,11 +71,18 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Chapter?'),
-        content: const Text('Are you sure you want to delete this chapter? This cannot be undone.'),
+        content: const Text(
+          'Are you sure you want to delete this chapter? This cannot be undone.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.lightDestructive),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.lightDestructive,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete', style: TextStyle(color: Colors.white)),
           ),
@@ -74,7 +93,9 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
     if (confirmed == true && mounted) {
       setState(() => _isLoading = true);
       try {
-        await ref.read(courseRepositoryProvider).deleteChapter(widget.courseId, widget.chapterId);
+        await ref
+            .read(courseRepositoryProvider)
+            .deleteChapter(widget.courseId, widget.chapterId);
         if (mounted) {
           context.go('/teacher/courses/${widget.courseId}');
         }
@@ -96,9 +117,15 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Edit Chapter Title'),
-        content: TextField(controller: controller, decoration: const InputDecoration(labelText: 'Title')),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Title'),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               if (controller.text.trim().isNotEmpty) {
@@ -108,7 +135,12 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                   widget.chapterId,
                   {'title': controller.text.trim()},
                 );
-                ref.invalidate(chapterDetailsProvider((courseId: widget.courseId, chapterId: widget.chapterId)));
+                ref.invalidate(
+                  chapterDetailsProvider((
+                    courseId: widget.courseId,
+                    chapterId: widget.chapterId,
+                  )),
+                );
               }
             },
             child: const Text('Save'),
@@ -127,10 +159,15 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
         content: TextField(
           controller: controller,
           maxLines: 5,
-          decoration: const InputDecoration(labelText: 'Description (Markdown supported)'),
+          decoration: const InputDecoration(
+            labelText: 'Description (Markdown supported)',
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
@@ -139,7 +176,12 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                 widget.chapterId,
                 {'description': controller.text.trim()},
               );
-              ref.invalidate(chapterDetailsProvider((courseId: widget.courseId, chapterId: widget.chapterId)));
+              ref.invalidate(
+                chapterDetailsProvider((
+                  courseId: widget.courseId,
+                  chapterId: widget.chapterId,
+                )),
+              );
             },
             child: const Text('Save'),
           ),
@@ -163,11 +205,17 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
               style: TextStyle(fontSize: 12),
             ),
             const SizedBox(height: 12),
-            TextField(controller: controller, decoration: const InputDecoration(labelText: 'Video URL')),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(labelText: 'Video URL'),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final url = controller.text.trim();
@@ -177,7 +225,12 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                 widget.chapterId,
                 {'videoUrl': url},
               );
-              ref.invalidate(chapterDetailsProvider((courseId: widget.courseId, chapterId: widget.chapterId)));
+              ref.invalidate(
+                chapterDetailsProvider((
+                  courseId: widget.courseId,
+                  chapterId: widget.chapterId,
+                )),
+              );
             },
             child: const Text('Save & Process'),
           ),
@@ -192,10 +245,12 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
     final colorScheme = theme.colorScheme;
     final isCompact = Breakpoints.isCompact(context);
 
-    final chapterAsync = ref.watch(chapterDetailsProvider((
-      courseId: widget.courseId,
-      chapterId: widget.chapterId,
-    )));
+    final chapterAsync = ref.watch(
+      chapterDetailsProvider((
+        courseId: widget.courseId,
+        chapterId: widget.chapterId,
+      )),
+    );
 
     return ResponsiveLayout(
       title: 'Chapter Setup',
@@ -204,7 +259,12 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => ErrorStateWidget(
           message: err.toString(),
-          onRetry: () => ref.invalidate(chapterDetailsProvider((courseId: widget.courseId, chapterId: widget.chapterId))),
+          onRetry: () => ref.invalidate(
+            chapterDetailsProvider((
+              courseId: widget.courseId,
+              chapterId: widget.chapterId,
+            )),
+          ),
         ),
         data: (data) {
           final chapter = data['chapter'] != null
@@ -227,7 +287,8 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
               children: [
                 // Back link
                 InkWell(
-                  onTap: () => context.go('/teacher/courses/${widget.courseId}'),
+                  onTap: () =>
+                      context.go('/teacher/courses/${widget.courseId}'),
                   borderRadius: BorderRadius.circular(6),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -236,7 +297,13 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                       children: const [
                         Icon(Icons.arrow_back_rounded, size: 16),
                         SizedBox(width: 6),
-                        Text('Back to course setup', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                        Text(
+                          'Back to course setup',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -252,16 +319,26 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                     decoration: BoxDecoration(
                       color: AppColors.brandAmber.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: Colors.amber.withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.warning_amber_rounded, size: 20, color: AppColors.brandAmber),
+                        const Icon(
+                          Icons.warning_amber_rounded,
+                          size: 20,
+                          color: AppColors.brandAmber,
+                        ),
                         const SizedBox(width: 10),
                         const Expanded(
                           child: Text(
                             'This chapter is unpublished. It will not be visible in the course.',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.amber),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.amber,
+                            ),
                           ),
                         ),
                       ],
@@ -275,23 +352,45 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Chapter Creation', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                          Text(
+                            'Chapter Creation',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           const SizedBox(height: 4),
-                          Text('Complete all fields (title, description, and video)', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13)),
+                          Text(
+                            'Complete all fields (title, description, and video)',
+                            style: TextStyle(
+                              color: colorScheme.onSurfaceVariant,
+                              fontSize: 13,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: chapter.isPublished ? colorScheme.surfaceContainerHighest : AppColors.brandEmerald,
-                        foregroundColor: chapter.isPublished ? colorScheme.onSurface : Colors.white,
+                        backgroundColor: chapter.isPublished
+                            ? colorScheme.surfaceContainerHighest
+                            : AppColors.brandEmerald,
+                        foregroundColor: chapter.isPublished
+                            ? colorScheme.onSurface
+                            : Colors.white,
                       ),
-                      onPressed: _isLoading ? null : () => _togglePublish(chapter),
-                      child: Text(chapter.isPublished ? 'Unpublish' : 'Publish'),
+                      onPressed: _isLoading
+                          ? null
+                          : () => _togglePublish(chapter),
+                      child: Text(
+                        chapter.isPublished ? 'Unpublish' : 'Publish',
+                      ),
                     ),
                     const SizedBox(width: 8),
                     IconButton.outlined(
-                      icon: const Icon(Icons.delete_outline_rounded, color: AppColors.lightDestructive),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: AppColors.lightDestructive,
+                      ),
                       onPressed: _isLoading ? null : _deleteChapter,
                     ),
                   ],
@@ -347,18 +446,33 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppColors.brandSky.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: const Icon(Icons.dashboard_customize_rounded, size: 20, color: AppColors.brandSky),
+              decoration: BoxDecoration(
+                color: AppColors.brandSky.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.dashboard_customize_rounded,
+                size: 20,
+                color: AppColors.brandSky,
+              ),
             ),
             const SizedBox(width: 10),
-            Text('Customize your chapter', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            Text(
+              'Customize your chapter',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 16),
         Card(
           elevation: 0,
           child: ListTile(
-            title: const Text('Chapter title', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            title: const Text(
+              'Chapter title',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
             subtitle: Text(chapter.title, style: const TextStyle(fontSize: 14)),
             trailing: IconButton(
               icon: const Icon(Icons.edit_outlined, size: 18),
@@ -370,14 +484,21 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
         Card(
           elevation: 0,
           child: ListTile(
-            title: const Text('Chapter description', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            title: const Text(
+              'Chapter description',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
             subtitle: Text(
-              chapter.description?.isNotEmpty == true ? chapter.description! : 'No description provided',
+              chapter.description?.isNotEmpty == true
+                  ? chapter.description!
+                  : 'No description provided',
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 13,
-                fontStyle: chapter.description?.isNotEmpty == true ? FontStyle.normal : FontStyle.italic,
+                fontStyle: chapter.description?.isNotEmpty == true
+                    ? FontStyle.normal
+                    : FontStyle.italic,
               ),
             ),
             trailing: IconButton(
@@ -400,11 +521,23 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppColors.brandSky.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: const Icon(Icons.visibility_rounded, size: 20, color: AppColors.brandSky),
+              decoration: BoxDecoration(
+                color: AppColors.brandSky.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.visibility_rounded,
+                size: 20,
+                color: AppColors.brandSky,
+              ),
             ),
             const SizedBox(width: 10),
-            Text('Access Settings', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            Text(
+              'Access Settings',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: 16),
@@ -412,7 +545,10 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
           elevation: 0,
           child: CheckboxListTile(
             value: chapter.isFree,
-            title: const Text('Free Preview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            title: const Text(
+              'Free Preview',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
             subtitle: const Text(
               'Check this box if you want to make this chapter free for preview without purchasing.',
               style: TextStyle(fontSize: 12),
@@ -424,7 +560,12 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                   widget.chapterId,
                   {'isFree': val},
                 );
-                ref.invalidate(chapterDetailsProvider((courseId: widget.courseId, chapterId: widget.chapterId)));
+                ref.invalidate(
+                  chapterDetailsProvider((
+                    courseId: widget.courseId,
+                    chapterId: widget.chapterId,
+                  )),
+                );
               }
             },
           ),
@@ -444,15 +585,29 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
           children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: AppColors.brandSky.withValues(alpha: 0.1), shape: BoxShape.circle),
-              child: const Icon(Icons.video_call_rounded, size: 20, color: AppColors.brandSky),
+              decoration: BoxDecoration(
+                color: AppColors.brandSky.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.video_call_rounded,
+                size: 20,
+                color: AppColors.brandSky,
+              ),
             ),
             const SizedBox(width: 10),
-            Text('Add a video', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            Text(
+              'Add a video',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const Spacer(),
             TextButton.icon(
               icon: const Icon(Icons.edit_outlined, size: 16),
-              label: Text(chapter.videoUrl != null ? 'Change video' : 'Add video'),
+              label: Text(
+                chapter.videoUrl != null ? 'Change video' : 'Add video',
+              ),
               onPressed: () => _showEditVideoModal(chapter),
             ),
           ],
@@ -464,8 +619,11 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (muxPlaybackId != null && muxPlaybackId.isNotEmpty)
-                MuxVideoPlayer(playbackId: muxPlaybackId)
+              if (chapter.videoUrl != null && chapter.videoUrl!.isNotEmpty)
+                UploadThingVideoPlayer(
+                  chapterId: chapter.id,
+                  uploadThingVideoUrl: chapter.videoUrl,
+                )
               else
                 Container(
                   height: 200,
@@ -474,13 +632,20 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.video_library_outlined, size: 40, color: colorScheme.onSurfaceVariant),
+                      Icon(
+                        Icons.video_library_outlined,
+                        size: 40,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                       const SizedBox(height: 10),
                       Text(
                         chapter.videoUrl != null
-                            ? 'Processing video with Mux...'
+                            ? 'Video preview unavailable.'
                             : 'No video uploaded yet.',
-                        style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13),
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ),
@@ -489,7 +654,10 @@ class _ChapterEditorScreenState extends ConsumerState<ChapterEditorScreen> {
                 padding: const EdgeInsets.all(12.0),
                 child: Text(
                   'Videos are processed using Mux for optimal HLS adaptive bitrate streaming.',
-                  style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 11),
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],

@@ -10,7 +10,8 @@ import '../../../core/utils/breakpoints.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../../courses/data/course_repository.dart';
 import '../../courses/domain/course_entity.dart';
-import 'widgets/mux_video_player.dart';
+import '../../dashboard/presentation/dashboard_controller.dart';
+import 'widgets/uploadthing_video_player.dart';
 
 final chapterDetailsProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>, ({String courseId, String chapterId})>((
@@ -89,15 +90,26 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
     setState(() => _isCheckingOut = true);
     try {
       final repo = ref.read(courseRepositoryProvider);
-      final checkoutUrl = await repo.createCheckoutSession(
+      final checkoutResult = await repo.createCheckoutSession(
         widget.courseId,
         returnUrl: 'termini://course/${widget.courseId}',
       );
-      final uri = Uri.parse(checkoutUrl);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (checkoutResult.enrolled) {
+        ref.invalidate(dashboardControllerProvider);
+        ref.invalidate(courseDetailsProvider(widget.courseId));
+        ref.invalidate(
+          chapterDetailsProvider((
+            courseId: widget.courseId,
+            chapterId: widget.chapterId,
+          )),
+        );
       } else {
-        throw 'Could not launch checkout URL';
+        final checkoutUrl = checkoutResult.checkoutUrl;
+        final uri = checkoutUrl == null ? null : Uri.tryParse(checkoutUrl);
+        if (uri == null ||
+            !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+          throw 'Could not launch checkout URL';
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -185,8 +197,6 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
           final isFree = chapter?.isFree ?? false;
           final hasAccess = isFree || isPurchased;
 
-          final muxPlaybackId = data['muxData']?['playbackId'] as String?;
-          final muxPlaybackToken = data['muxData']?['playbackToken'] as String?;
           final nextChapter = data['nextChapter'] != null
               ? ChapterEntity.fromJson(
                   data['nextChapter'] as Map<String, dynamic>,
@@ -213,14 +223,11 @@ class _ChapterPlayerScreenState extends ConsumerState<ChapterPlayerScreen> {
               children: [
                 // Video Player or Lock Banner
                 if (hasAccess &&
-                    ((muxPlaybackId != null && muxPlaybackId.isNotEmpty) ||
-                        (chapter.videoUrl != null &&
-                            chapter.videoUrl!.isNotEmpty)))
-                  MuxVideoPlayer(
+                    chapter.videoUrl != null &&
+                    chapter.videoUrl!.isNotEmpty)
+                  UploadThingVideoPlayer(
                     chapterId: chapter.id,
-                    playbackId: muxPlaybackId,
-                    playbackToken: muxPlaybackToken,
-                    fallbackVideoUrl: chapter.videoUrl,
+                    uploadThingVideoUrl: chapter.videoUrl,
                     onVideoEnd: () {
                       if (!isCompleted) _handleProgressToggle(false);
                     },

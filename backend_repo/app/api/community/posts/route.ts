@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { ensureCommunitySettings, ensureCommunitySpaces, getCommunityOwnerId, serializeCommunityPost } from "@/lib/community";
 import { isTeacher } from "@/lib/teacher";
+import { sendCommunityPostPush } from "@/lib/push";
+
+export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const { userId } = auth();
@@ -55,6 +58,17 @@ export async function POST(req: Request) {
       data: { title, content, spaceId: space.id, ownerId, authorId: userId, isAnnouncement, isApproved: isAdmin || !settings.requirePostApproval },
       include: { space: { select: { id: true, name: true, color: true } }, comments: true },
     });
+    if (isAdmin && post.isApproved) {
+      try {
+        const sent = await sendCommunityPostPush(post);
+        if (!sent) console.warn("[COMMUNITY_PUSH] Firebase service account is not configured");
+      } catch (error) {
+        console.error(
+          "[COMMUNITY_PUSH] Delivery failed:",
+          error instanceof Error ? error.message : "unknown error",
+        );
+      }
+    }
     return NextResponse.json(serializeCommunityPost(post), { status: 201 });
   } catch (error) {
     console.error("[COMMUNITY_POSTS_POST]", error);

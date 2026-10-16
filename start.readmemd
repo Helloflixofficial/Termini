@@ -1,0 +1,62 @@
+# Start Termini (Windows)
+
+Follow these steps in **Command Prompt** (`cmd.exe`). Keep the backend window open while using the app.
+
+## 1. Check whether the backend is already running
+
+```bat
+curl.exe http://localhost:3000/healthz
+```
+
+If you see `"status":"ok"` and `"database":"connected"`, the backend and database are ready. Skip to step 3.
+
+If the command cannot connect, start the backend in this same window:
+
+```bat
+cd /d C:\Users\zero\Desktop\termini\backend_repo
+npm run dev:api
+```
+
+Wait for the message that the server is listening and PostgreSQL is connected. Leave this window open.
+
+## 2. If you see `EADDRINUSE`
+
+That means port 3000 is already occupied. Check the health URL above. If it reports the server and database are healthy, **do not start another server**; go to step 3.
+
+If the health URL does not work, find the process using port 3000:
+
+```bat
+netstat -ano | findstr :3000
+```
+
+The number at the end of the `LISTENING` line is the process ID. Check what it is before stopping anything:
+
+```bat
+tasklist /FI "PID eq 12345"
+```
+
+Replace `12345` with that process ID. Stop it only if you have confirmed it is a leftover Termini server. Then repeat step 1 to start the backend.
+
+## 3. Connect the phone and run the app
+
+Open a **second Command Prompt** window. Connect the phone with USB debugging enabled, then run:
+
+```bat
+cd /d C:\Users\zero\Desktop\termini
+adb devices
+adb -s 8L7D4DLBZDZ9ZLNB reverse tcp:3000 tcp:3000
+flutter run -d 8L7D4DLBZDZ9ZLNB --dart-define=API_BASE_URL=http://127.0.0.1:3000
+```
+
+If `adb devices` shows a different device ID, replace `8L7D4DLBZDZ9ZLNB` in both commands with the ID shown there. This runs the current app build on the phone and points it at the backend on this computer. Keep the backend window from step 1 running.
+
+## 4. Stop the servers
+
+When you are done, press **Ctrl+C** in the Flutter window and in the backend window.
+
+## Notes
+
+- The database is PostgreSQL configured by `backend_repo\.env`; it connects when the backend starts. There is no separate local database command for this setup.
+- Keep `backend_repo\.env` private. Do not paste its contents into chat or commit it to GitHub.
+- `EADDRINUSE` by itself does not mean the backend is broken. It commonly means the backend is already running on port 3000.
+- In Command Prompt, use `dir` to list files; `ls` is a PowerShell/Linux command.

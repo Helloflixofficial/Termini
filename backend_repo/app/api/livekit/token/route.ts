@@ -2,6 +2,7 @@ import { auth, currentUser } from "@clerk/nextjs";
 import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
 import { NextRequest, NextResponse } from "next/server";
 import { isTeacher } from "@/lib/teacher";
+import { db } from "@/lib/db";
 
 export async function GET(req: NextRequest) {
   const { userId } = auth();
@@ -12,6 +13,11 @@ export async function GET(req: NextRequest) {
   const room = req.nextUrl.searchParams.get("room");
   if (!room) {
     return NextResponse.json({ error: "Missing room parameter" }, { status: 400 });
+  }
+
+  const session = await db.meetingSession.findUnique({ where: { roomName: room } });
+  if (!session || (!session.isActive && !isTeacher(userId))) {
+    return NextResponse.json({ error: "Live session is unavailable" }, { status: 404 });
   }
 
   const apiKey = process.env.LIVEKIT_API_KEY;

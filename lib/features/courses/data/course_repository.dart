@@ -1,16 +1,35 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../core/config/api_constants.dart';
 import '../../../core/network/api_client.dart';
 import '../domain/course_entity.dart';
+
+class CheckoutSessionResult {
+  final String? checkoutUrl;
+  final bool enrolled;
+
+  const CheckoutSessionResult({this.checkoutUrl, required this.enrolled});
+}
 
 abstract class CourseRepository {
   Future<List<CourseEntity>> getCourses({String? title, String? categoryId});
   Future<List<CategoryEntity>> getCategories();
   Future<CourseEntity> getCourseDetails(String courseId);
-  Future<Map<String, dynamic>> getChapterDetails(String courseId, String chapterId);
-  Future<void> updateChapterProgress(String courseId, String chapterId, bool isCompleted);
-  Future<String> createCheckoutSession(String courseId, {String? returnUrl});
+  Future<Map<String, dynamic>> getChapterDetails(
+    String courseId,
+    String chapterId,
+  );
+  Future<void> updateChapterProgress(
+    String courseId,
+    String chapterId,
+    bool isCompleted,
+  );
+  Future<CheckoutSessionResult> createCheckoutSession(
+    String courseId, {
+    String? returnUrl,
+  });
+  Future<bool> verifyCheckoutSession(String courseId, String sessionId);
 
   // Teacher actions
   Future<List<CourseEntity>> getTeacherCourses();
@@ -22,14 +41,25 @@ abstract class CourseRepository {
 
   // Chapter management
   Future<ChapterEntity> createChapter(String courseId, String title);
-  Future<void> reorderChapters(String courseId, List<Map<String, dynamic>> list);
-  Future<ChapterEntity> updateChapter(String courseId, String chapterId, Map<String, dynamic> data);
+  Future<void> reorderChapters(
+    String courseId,
+    List<Map<String, dynamic>> list,
+  );
+  Future<ChapterEntity> updateChapter(
+    String courseId,
+    String chapterId,
+    Map<String, dynamic> data,
+  );
   Future<void> deleteChapter(String courseId, String chapterId);
   Future<void> publishChapter(String courseId, String chapterId);
   Future<void> unpublishChapter(String courseId, String chapterId);
 
   // Attachments
-  Future<AttachmentEntity> addAttachment(String courseId, String name, String url);
+  Future<AttachmentEntity> addAttachment(
+    String courseId,
+    String name,
+    String url,
+  );
   Future<void> deleteAttachment(String courseId, String attachmentId);
 }
 
@@ -39,17 +69,23 @@ class CourseRepositoryImpl implements CourseRepository {
   CourseRepositoryImpl(this._dio);
 
   @override
-  Future<List<CourseEntity>> getCourses({String? title, String? categoryId}) async {
+  Future<List<CourseEntity>> getCourses({
+    String? title,
+    String? categoryId,
+  }) async {
     try {
       final res = await _dio.get(
         ApiConstants.courses,
         queryParameters: {
           if (title != null && title.isNotEmpty) 'title': title,
-          if (categoryId != null && categoryId.isNotEmpty) 'categoryId': categoryId,
+          if (categoryId != null && categoryId.isNotEmpty)
+            'categoryId': categoryId,
         },
       );
       final list = res.data as List;
-      return list.map((json) => CourseEntity.fromJson(json as Map<String, dynamic>)).toList();
+      return list
+          .map((json) => CourseEntity.fromJson(json as Map<String, dynamic>))
+          .toList();
     } on DioException catch (e) {
       throw handleDioError(e);
     }
@@ -60,7 +96,9 @@ class CourseRepositoryImpl implements CourseRepository {
     try {
       final res = await _dio.get(ApiConstants.categories);
       final list = res.data as List;
-      return list.map((json) => CategoryEntity.fromJson(json as Map<String, dynamic>)).toList();
+      return list
+          .map((json) => CategoryEntity.fromJson(json as Map<String, dynamic>))
+          .toList();
     } on DioException catch (e) {
       throw handleDioError(e);
     }
@@ -77,7 +115,10 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<Map<String, dynamic>> getChapterDetails(String courseId, String chapterId) async {
+  Future<Map<String, dynamic>> getChapterDetails(
+    String courseId,
+    String chapterId,
+  ) async {
     try {
       final res = await _dio.get(ApiConstants.chapter(courseId, chapterId));
       return res.data as Map<String, dynamic>;
@@ -87,7 +128,11 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<void> updateChapterProgress(String courseId, String chapterId, bool isCompleted) async {
+  Future<void> updateChapterProgress(
+    String courseId,
+    String chapterId,
+    bool isCompleted,
+  ) async {
     try {
       await _dio.put(
         ApiConstants.chapterProgress(courseId, chapterId),
@@ -99,16 +144,33 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<String> createCheckoutSession(String courseId, {String? returnUrl}) async {
+  Future<CheckoutSessionResult> createCheckoutSession(
+    String courseId, {
+    String? returnUrl,
+  }) async {
     try {
       final res = await _dio.post(
         ApiConstants.checkout(courseId),
-        data: {
-          'returnUrl': ?returnUrl,
-        },
+        data: {'returnUrl': ?returnUrl},
       );
-      final url = res.data['url'] as String;
-      return url;
+      final data = res.data as Map<String, dynamic>;
+      return CheckoutSessionResult(
+        checkoutUrl: data['url'] as String?,
+        enrolled: data['enrolled'] as bool? ?? false,
+      );
+    } on DioException catch (e) {
+      throw handleDioError(e);
+    }
+  }
+
+  @override
+  Future<bool> verifyCheckoutSession(String courseId, String sessionId) async {
+    try {
+      final res = await _dio.post(
+        ApiConstants.verifyCheckout(courseId),
+        data: {'sessionId': sessionId},
+      );
+      return (res.data as Map<String, dynamic>)['enrolled'] == true;
     } on DioException catch (e) {
       throw handleDioError(e);
     }
@@ -119,7 +181,9 @@ class CourseRepositoryImpl implements CourseRepository {
     try {
       final res = await _dio.get(ApiConstants.teacherCourses);
       final list = res.data as List;
-      return list.map((json) => CourseEntity.fromJson(json as Map<String, dynamic>)).toList();
+      return list
+          .map((json) => CourseEntity.fromJson(json as Map<String, dynamic>))
+          .toList();
     } on DioException catch (e) {
       throw handleDioError(e);
     }
@@ -128,10 +192,7 @@ class CourseRepositoryImpl implements CourseRepository {
   @override
   Future<CourseEntity> createCourse(String title) async {
     try {
-      final res = await _dio.post(
-        ApiConstants.courses,
-        data: {'title': title},
-      );
+      final res = await _dio.post(ApiConstants.courses, data: {'title': title});
       return CourseEntity.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
       throw handleDioError(e);
@@ -139,12 +200,12 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<CourseEntity> updateCourse(String courseId, Map<String, dynamic> data) async {
+  Future<CourseEntity> updateCourse(
+    String courseId,
+    Map<String, dynamic> data,
+  ) async {
     try {
-      final res = await _dio.patch(
-        ApiConstants.course(courseId),
-        data: data,
-      );
+      final res = await _dio.patch(ApiConstants.course(courseId), data: data);
       return CourseEntity.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
       throw handleDioError(e);
@@ -192,7 +253,10 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<void> reorderChapters(String courseId, List<Map<String, dynamic>> list) async {
+  Future<void> reorderChapters(
+    String courseId,
+    List<Map<String, dynamic>> list,
+  ) async {
     try {
       await _dio.put(
         ApiConstants.chaptersReorder(courseId),
@@ -204,7 +268,11 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<ChapterEntity> updateChapter(String courseId, String chapterId, Map<String, dynamic> data) async {
+  Future<ChapterEntity> updateChapter(
+    String courseId,
+    String chapterId,
+    Map<String, dynamic> data,
+  ) async {
     try {
       final res = await _dio.patch(
         ApiConstants.chapter(courseId, chapterId),
@@ -244,7 +312,11 @@ class CourseRepositoryImpl implements CourseRepository {
   }
 
   @override
-  Future<AttachmentEntity> addAttachment(String courseId, String name, String url) async {
+  Future<AttachmentEntity> addAttachment(
+    String courseId,
+    String name,
+    String url,
+  ) async {
     try {
       final res = await _dio.post(
         ApiConstants.courseAttachments(courseId),

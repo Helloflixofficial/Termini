@@ -131,72 +131,71 @@ class CourseCard extends StatelessWidget {
             ),
           ],
         ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  course.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    height: 1.2,
-                  ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                course.title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  height: 1.2,
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  '${course.chaptersCount} ${course.chaptersCount == 1 ? 'lesson' : 'lessons'}  ·  ${course.category?.name ?? 'Course'}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${course.chaptersCount} ${course.chaptersCount == 1 ? 'lesson' : 'lessons'}  ·  ${course.category?.name ?? 'Course'}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
-                const Spacer(),
-                Row(
-                  children: [
-                    Icon(
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    course.progress == 100
+                        ? Icons.check_circle_rounded
+                        : Icons.play_circle_outline_rounded,
+                    size: 17,
+                    color: course.progress == 100
+                        ? AppColors.brandEmerald
+                        : colorScheme.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
                       course.progress == 100
-                          ? Icons.check_circle_rounded
-                          : Icons.play_circle_outline_rounded,
-                      size: 17,
-                      color: course.progress == 100
-                          ? AppColors.brandEmerald
-                          : colorScheme.primary,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        course.progress == 100
-                            ? 'Course completed'
-                            : 'Continue learning',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: course.progress == 100
-                              ? AppColors.brandEmerald
-                              : colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
+                          ? 'Course completed'
+                          : 'Continue learning',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: course.progress == 100
+                            ? AppColors.brandEmerald
+                            : colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (enrolled)
-                      Text(
-                        '${(course.progress ?? 0).toInt()}%',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: course.progress == 100
-                              ? AppColors.brandEmerald
-                              : colorScheme.primary,
-                        ),
+                  ),
+                  if (enrolled)
+                    Text(
+                      '${(course.progress ?? 0).toInt()}%',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: course.progress == 100
+                            ? AppColors.brandEmerald
+                            : colorScheme.primary,
                       ),
-                  ],
-                ),
-              ],
-            ),
+                    ),
+                ],
+              ),
+            ],
           ),
         ),
       ],

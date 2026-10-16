@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../../../core/widgets/responsive_layout.dart';
@@ -10,10 +11,13 @@ import '../data/livekit_repository.dart';
 import '../domain/meeting_entity.dart';
 
 final studentSessionsProvider =
-    FutureProvider.autoDispose<List<MeetingSessionEntity>>((ref) async {
-  final repo = ref.watch(liveKitRepositoryProvider);
-  return repo.getSessions();
-});
+    StreamProvider.autoDispose<List<MeetingSessionEntity>>((ref) async* {
+      final repo = ref.watch(liveKitRepositoryProvider);
+      while (true) {
+        yield await repo.getSessions();
+        await Future<void>.delayed(const Duration(seconds: 12));
+      }
+    });
 
 class StudentMeetScreen extends ConsumerStatefulWidget {
   const StudentMeetScreen({super.key});
@@ -41,6 +45,11 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
     context.go('/meet/$roomName');
   }
 
+  Future<void> _refreshSessions() async {
+    ref.invalidate(studentSessionsProvider);
+    await ref.read(studentSessionsProvider.future);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -52,7 +61,7 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
       title: 'ShortMeet',
       currentRoute: '/shortmeet',
       body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(studentSessionsProvider),
+        onRefresh: _refreshSessions,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -105,7 +114,11 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                           SizedBox(height: 6),
                           Text(
                             'Paste a room code or meeting link to instantly join a live class.',
-                            style: TextStyle(fontSize: 13.5, color: Colors.white70, height: 1.4),
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              color: Colors.white70,
+                              height: 1.4,
+                            ),
                           ),
                         ],
                       ),
@@ -117,7 +130,11 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                         color: Colors.white.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 32),
+                      child: const Icon(
+                        Icons.videocam_rounded,
+                        color: Colors.white,
+                        size: 32,
+                      ),
                     ),
                   ],
                 ),
@@ -133,7 +150,9 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                   border: Border.all(color: colorScheme.outline),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.2 : 0.04,
+                      ),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -150,12 +169,18 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                             color: AppColors.brandSky.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.meeting_room_rounded, color: AppColors.brandSky, size: 20),
+                          child: const Icon(
+                            Icons.meeting_room_rounded,
+                            color: AppColors.brandSky,
+                            size: 20,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Text(
                           'Enter Room Code or Meeting Link',
-                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ],
                     ),
@@ -171,10 +196,18 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                               fillColor: colorScheme.surfaceContainerLowest,
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: colorScheme.outline),
+                                borderSide: BorderSide(
+                                  color: colorScheme.outline,
+                                ),
                               ),
-                              prefixIcon: const Icon(Icons.link_rounded, size: 20),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              prefixIcon: const Icon(
+                                Icons.link_rounded,
+                                size: 20,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
                             ),
                             onSubmitted: (_) => _handleJoinInput(),
                           ),
@@ -188,8 +221,12 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.brandSky,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                             onPressed: _handleJoinInput,
                           ),
@@ -215,22 +252,41 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                   const SizedBox(width: 10),
                   Text(
                     'Active Live Sessions',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFEF4444).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: const [
-                        Icon(Icons.fiber_manual_record, size: 8, color: Color(0xFFEF4444)),
+                        Icon(
+                          Icons.fiber_manual_record,
+                          size: 8,
+                          color: Color(0xFFEF4444),
+                        ),
                         SizedBox(width: 4),
-                        Text('LIVE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFFEF4444), letterSpacing: 0.6)),
+                        Text(
+                          'LIVE',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFFEF4444),
+                            letterSpacing: 0.6,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -241,14 +297,22 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
               sessionsAsync.when(
                 loading: () => Column(
                   children: const [
-                    SkeletonLoader(width: double.infinity, height: 100, borderRadius: 14),
+                    SkeletonLoader(
+                      width: double.infinity,
+                      height: 100,
+                      borderRadius: 14,
+                    ),
                     SizedBox(height: 12),
-                    SkeletonLoader(width: double.infinity, height: 100, borderRadius: 14),
+                    SkeletonLoader(
+                      width: double.infinity,
+                      height: 100,
+                      borderRadius: 14,
+                    ),
                   ],
                 ),
                 error: (err, _) => ErrorStateWidget(
                   message: err.toString(),
-                  onRetry: () => ref.invalidate(studentSessionsProvider),
+                  onRetry: _refreshSessions,
                 ),
                 data: (sessions) {
                   final active = sessions.where((s) => s.isActive).toList();
@@ -264,14 +328,20 @@ class _StudentMeetScreenState extends ConsumerState<StudentMeetScreen> {
                     );
                   }
 
-                  return Column(
-                    children: active.map((s) => _StudentSessionCard(
-                      session: s,
-                      onJoin: () => context.go('/meet/${s.roomName}'),
-                      isDark: isDark,
-                      colorScheme: colorScheme,
-                      theme: theme,
-                    )).toList(),
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: active.length,
+                    itemBuilder: (context, index) {
+                      final session = active[index];
+                      return _StudentSessionCard(
+                        session: session,
+                        onJoin: () => context.go('/meet/${session.roomName}'),
+                        isDark: isDark,
+                        colorScheme: colorScheme,
+                        theme: theme,
+                      );
+                    },
                   );
                 },
               ),
@@ -300,92 +370,112 @@ class _StudentSessionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 520;
+    final icon = Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF10B981), Color(0xFF059669)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.brandEmerald.withValues(alpha: 0.35),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
+    );
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          session.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        if (session.description != null && session.description!.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            session.description!,
+            maxLines: compact ? 2 : 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+          ),
+        ],
+        const SizedBox(height: 5),
+        Text(
+          'Started ${DateFormat.jm().format(session.createdAt)}',
+          style: TextStyle(
+            fontSize: 11,
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
+          ),
+        ),
+      ],
+    );
+    final joinButton = ElevatedButton.icon(
+      icon: const Icon(Icons.videocam_rounded, size: 16),
+      label: const Text('Join'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppColors.brandEmerald,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+      onPressed: onJoin,
+    );
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: AppColors.brandEmerald.withValues(alpha: 0.5),
+          color: AppColors.brandEmerald.withValues(alpha: 0.45),
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.brandEmerald.withValues(alpha: isDark ? 0.15 : 0.08),
+            color: AppColors.brandEmerald.withValues(
+              alpha: isDark ? 0.13 : 0.06,
+            ),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Row(
-        children: [
-          // Live indicator
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF10B981), Color(0xFF059669)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.brandEmerald.withValues(alpha: 0.4),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.videocam_rounded, color: Colors.white, size: 22),
-          ),
-          const SizedBox(width: 14),
-
-          // Info
-          Expanded(
-            child: Column(
+      child: compact
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  session.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: 12),
+                    Expanded(child: details),
+                  ],
                 ),
-                if (session.description != null && session.description!.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    session.description!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
-                  ),
-                ],
-                const SizedBox(height: 5),
-                Text(
-                  'Started ${DateFormat.jm().format(session.createdAt)} • ${session.roomName}',
-                  style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7)),
-                ),
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: joinButton),
+              ],
+            )
+          : Row(
+              children: [
+                icon,
+                const SizedBox(width: 14),
+                Expanded(child: details),
+                const SizedBox(width: 12),
+                joinButton,
               ],
             ),
-          ),
-          const SizedBox(width: 12),
-
-          // Join button
-          ElevatedButton.icon(
-            icon: const Icon(Icons.videocam_rounded, size: 16),
-            label: const Text('Join'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.brandEmerald,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: onJoin,
-          ),
-        ],
-      ),
     );
   }
 }

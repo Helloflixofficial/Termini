@@ -73,6 +73,7 @@ backend_repo/.next/
 .env*.local
 .env.*
 !.env.example
+android/app/google-services.json
 backend_repo/.env
 backend_repo/.env*
 !backend_repo/.env.example
@@ -84,6 +85,7 @@ key.properties
 android/key.properties
 .vercel/
 backend_repo/.vercel/
+.pnpm-store/
 
 
 # App branding assets

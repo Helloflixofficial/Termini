@@ -7,7 +7,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/config/env.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/theme/theme_provider.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../../../core/widgets/responsive_layout.dart';
 import '../../auth/presentation/auth_controller.dart';
@@ -16,48 +15,12 @@ import '../../dashboard/presentation/dashboard_controller.dart';
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
-  void _showSignOutDialog(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text(
-          'Are you sure you want to sign out of your account?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.destructive,
-            ),
-            onPressed: () async {
-              Navigator.of(ctx).pop();
-              try {
-                final clerkAuth = ClerkAuth.of(ctx);
-                await clerkAuth.signOut();
-              } catch (_) {}
-              await ref.read(authControllerProvider.notifier).signOut();
-              if (context.mounted) {
-                context.go('/sign-in');
-              }
-            },
-            child: const Text('Sign Out'),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final user = ref.watch(currentUserProvider);
-    final themeMode = ref.watch(themeModeProvider);
     final dashboardData = ref.watch(dashboardControllerProvider).valueOrNull;
 
     // Direct Clerk state from widget tree
@@ -427,7 +390,7 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 24),
 
-                  // Preferences & Theme Section
+                  // Notification preferences
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -439,7 +402,7 @@ class ProfileScreen extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'APP PREFERENCES',
+                          'PREFERENCES',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w800,
@@ -449,41 +412,70 @@ class ProfileScreen extends ConsumerWidget {
                         ),
                         const SizedBox(height: 16),
 
-                        // Theme selection
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(8),
+                        Material(
+                          color: Colors.transparent,
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.manage_accounts_rounded,
+                                size: 20,
+                                color: colorScheme.primary,
+                              ),
                             ),
-                            child: Icon(
-                              isDark
-                                  ? Icons.dark_mode_rounded
-                                  : Icons.light_mode_rounded,
-                              size: 20,
-                              color: colorScheme.primary,
+                            title: const Text(
+                              'Profile and account',
+                              style: TextStyle(fontWeight: FontWeight.w700),
                             ),
-                          ),
-                          title: const Text(
-                            'Appearance / Theme',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: Text(
-                            'Current: ${themeMode == ThemeMode.dark
-                                ? "Dark"
-                                : themeMode == ThemeMode.light
-                                ? "Light"
-                                : "System Default"}',
-                            style: TextStyle(
-                              color: colorScheme.onSurfaceVariant,
-                              fontSize: 13,
+                            subtitle: Text(
+                              'Edit your Clerk name, photo and account details',
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 13,
+                              ),
                             ),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: () => context.push('/profile/account'),
                           ),
-                          trailing: const ThemeToggleButton(),
                         ),
-                        const Divider(),
+                        Divider(color: colorScheme.outlineVariant),
+                        Material(
+                          color: Colors.transparent,
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                Icons.notifications_active_rounded,
+                                size: 20,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                            title: const Text(
+                              'Notification settings',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              'Community alerts, sound, vibration and inbox',
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                                fontSize: 13,
+                              ),
+                            ),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: () =>
+                                context.push('/settings/notifications'),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -574,33 +566,6 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 32),
 
-                  // Sign Out Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _showSignOutDialog(context, ref),
-                      icon: const Icon(
-                        Icons.logout_rounded,
-                        color: AppColors.destructive,
-                        size: 20,
-                      ),
-                      label: const Text(
-                        'Sign Out',
-                        style: TextStyle(
-                          color: AppColors.destructive,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                        ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        side: const BorderSide(color: AppColors.destructive),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                    ),
-                  ),
                   const SizedBox(height: 40),
                 ],
               ),

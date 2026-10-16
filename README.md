@@ -283,6 +283,21 @@ flutter run -d windows
 
 Start `node server.js` from `backend_repo` in another terminal first. For database data to appear, the backend `.env` must point to a reachable database with this project's schema and data. The repository includes the Prisma schema and migrations, but does not include a copy of a private production database.
 
+## Community push notifications (Android)
+
+Community push notifications use Firebase Cloud Messaging. Register the Android package `com.helloflix.termini` in the same Firebase project as the server credential, download its `google-services.json`, and put the file at `android/app/google-services.json`. This local config is ignored by Git. Students who grant notification permission subscribe to the `community_students` topic; the backend sends a push when a teacher publishes an approved community post. The notification itself contains no post text.
+
+The backend (Node.js 22 or newer) also needs a Firebase service-account JSON credential with the Firebase Cloud Messaging API Admin role. Keep the JSON outside the repository and set `FIREBASE_SERVICE_ACCOUNT_BASE64` only in `backend_repo/.env` for local work or as a private environment variable in the deployment host. To create the local value from PowerShell while in `backend_repo`:
+
+```powershell
+$serviceAccountPath = Read-Host 'Path to the Firebase service-account JSON file'
+$serviceAccountJson = Get-Content -LiteralPath $serviceAccountPath -Raw
+$encodedCredential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($serviceAccountJson))
+Add-Content -LiteralPath .env -Value "FIREBASE_SERVICE_ACCOUNT_BASE64=$encodedCredential"
+```
+
+Enable the Firebase Cloud Messaging API for the project. Never commit the service account JSON or share its private key. The Firebase web `apiKey` and web `appId` are client identifiers; Android uses the Android registration file instead.
+
 ---
 
 ## Code Quality & Testing

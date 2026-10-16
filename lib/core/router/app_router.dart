@@ -7,6 +7,7 @@ import '../../features/auth/presentation/clerk_auth_screen.dart';
 import '../../features/community/presentation/community_screen.dart';
 import '../../features/community/presentation/community_notifications_screen.dart';
 import '../../features/community/presentation/community_settings_screen.dart';
+import '../../features/community/presentation/notification_settings_screen.dart';
 import '../../features/community/domain/community_entity.dart';
 import '../../features/courses/presentation/course_detail_screen.dart';
 import '../../features/courses/presentation/search_screen.dart';
@@ -15,6 +16,7 @@ import '../../features/live/presentation/live_meet_screen.dart';
 import '../../features/live/presentation/student_meet_screen.dart';
 import '../../features/player/presentation/chapter_player_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
+import '../../features/profile/presentation/account_settings_screen.dart';
 import '../../features/teacher/presentation/chapter_editor_screen.dart';
 import '../../features/teacher/presentation/course_editor_screen.dart';
 import '../../features/teacher/presentation/create_course_screen.dart';
@@ -47,7 +49,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final user = authState.asData?.value;
       final isLoading = authState.isLoading;
 
-      final isAuthRoute = state.matchedLocation == '/sign-in' || state.matchedLocation == '/sign-up';
+      final isAuthRoute =
+          state.matchedLocation == '/sign-in' ||
+          state.matchedLocation == '/sign-up';
 
       // While auth is still loading (checking stored session), don't redirect at all.
       // This prevents the sign-in flash when Clerk is restoring a persisted session.
@@ -56,7 +60,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // If user is not authenticated
       if (user == null) {
         // Allow public browsing for search, course preview, and auth routes
-        final isPublicRoute = isAuthRoute ||
+        final isPublicRoute =
+            isAuthRoute ||
             state.matchedLocation.startsWith('/search') ||
             state.matchedLocation.startsWith('/course/');
 
@@ -111,10 +116,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final courseId = state.pathParameters['courseId'] ?? '';
           final chapterId = state.pathParameters['chapterId'] ?? '';
-          return ChapterPlayerScreen(
-            courseId: courseId,
-            chapterId: chapterId,
-          );
+          return ChapterPlayerScreen(courseId: courseId, chapterId: chapterId);
         },
       ),
       GoRoute(
@@ -127,7 +129,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           }
           return Scaffold(
             appBar: AppBar(title: const Text('Post')),
-            body: const Center(child: Text('This post is no longer available.')),
+            body: const Center(
+              child: Text('This post is no longer available.'),
+            ),
           );
         },
       ),
@@ -142,6 +146,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const CommunityNotificationsScreen(),
       ),
       GoRoute(
+        path: '/settings/notifications',
+        name: 'notification-settings',
+        builder: (context, state) => const NotificationSettingsScreen(),
+      ),
+      GoRoute(
         path: '/meet/:roomName',
         name: 'live-meet',
         builder: (context, state) {
@@ -153,6 +162,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/profile',
         name: 'profile',
         builder: (context, state) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/profile/account',
+        name: 'profile-account-settings',
+        builder: (context, state) => const AccountSettingsScreen(),
       ),
       GoRoute(
         path: '/shortmeet',
@@ -185,10 +199,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) {
           final courseId = state.pathParameters['courseId'] ?? '';
           final chapterId = state.pathParameters['chapterId'] ?? '';
-          return ChapterEditorScreen(
-            courseId: courseId,
-            chapterId: chapterId,
-          );
+          return ChapterEditorScreen(courseId: courseId, chapterId: chapterId);
         },
       ),
       GoRoute(
@@ -217,7 +228,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 64, color: Colors.red),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 64,
+              color: Colors.red,
+            ),
             const SizedBox(height: 16),
             Text(
               'Page Not Found: ${state.uri}',

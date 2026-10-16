@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../utils/breakpoints.dart';
 import 'app_sidebar.dart';
 import 'top_navbar.dart';
@@ -24,7 +25,7 @@ class ResponsiveLayout extends ConsumerWidget {
   });
 
   int _getBottomNavIndex(String route) {
-    if (route == '/profile') return 4;
+    if (route.startsWith('/profile')) return 4;
     if (route == '/') return 0;
     if (route == '/search') return 1;
     if (route == '/community') return 2;
@@ -35,8 +36,7 @@ class ResponsiveLayout extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final screenType = Breakpoints.getScreenType(context);
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
 
     if (screenType == ScreenType.compact) {
       final topNavbar = TopNavbar(
@@ -124,10 +124,7 @@ class ResponsiveLayout extends ConsumerWidget {
     return Scaffold(
       body: Row(
         children: [
-          AppSidebar(
-            currentRoute: currentRoute,
-            isCollapsed: isMedium,
-          ),
+          AppSidebar(currentRoute: currentRoute, isCollapsed: isMedium),
           Expanded(
             child: Column(
               children: [

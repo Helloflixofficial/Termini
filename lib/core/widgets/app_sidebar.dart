@@ -1,59 +1,11 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
-import '../../features/auth/presentation/auth_controller.dart';
 import '../../features/auth/domain/user_entity.dart';
-
-class SidebarItemData {
-  final IconData icon;
-  final IconData? activeIcon;
-  final String label;
-  final String route;
-  final String? badge;
-  final Color? badgeColor;
-
-  const SidebarItemData({
-    required this.icon,
-    this.activeIcon,
-    required this.label,
-    required this.route,
-    this.badge,
-    this.badgeColor,
-  });
-}
-
-const List<SidebarItemData> studentRoutes = [
-  SidebarItemData(
-    icon: Icons.dashboard_outlined,
-    activeIcon: Icons.dashboard_rounded,
-    label: 'Dashboard',
-    route: '/',
-  ),
-  SidebarItemData(
-    icon: Icons.explore_outlined,
-    activeIcon: Icons.explore_rounded,
-    label: 'Browse Catalog',
-    route: '/search',
-  ),
-  SidebarItemData(
-    icon: Icons.forum_outlined,
-    activeIcon: Icons.forum_rounded,
-    label: 'Community',
-    route: '/community',
-    badge: 'Hub',
-    badgeColor: Color(0xFF0284C7),
-  ),
-  SidebarItemData(
-    icon: Icons.videocam_outlined,
-    activeIcon: Icons.videocam_rounded,
-    label: 'ShortMeet',
-    route: '/shortmeet',
-    badge: 'LIVE',
-    badgeColor: Color(0xFFEF4444),
-  ),
-];
+import '../../features/auth/presentation/auth_controller.dart';
+import '../theme/theme_provider.dart';
 
 class AppSidebar extends ConsumerWidget {
   final String currentRoute;
@@ -67,878 +19,429 @@ class AppSidebar extends ConsumerWidget {
     this.onNavigate,
   });
 
+  static const _studentItems = <_SidebarDestination>[
+    _SidebarDestination('Dashboard', '/', Icons.grid_view_rounded),
+    _SidebarDestination('Search courses', '/search', Icons.explore_rounded),
+    _SidebarDestination('Community', '/community', Icons.forum_outlined),
+    _SidebarDestination('ShortMeet', '/shortmeet', Icons.video_camera_front_outlined),
+  ];
+
+  bool _isActive(String route) => currentRoute == route ||
+      (route != '/' && currentRoute.startsWith(route));
+
+  void _go(BuildContext context, String route) {
+    onNavigate?.call();
+    context.go(route);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final currentUser = ref.watch(currentUserProvider);
-    final canTeach = currentUser?.isTeacher ?? false;
+    final user = ref.watch(currentUserProvider);
+    final canTeach = user?.isTeacher ?? false;
+    final selected = isDark ? Colors.white : const Color(0xFF111111);
+    final selectedForeground = isDark ? const Color(0xFF111111) : Colors.white;
+    final destinations = <_SidebarDestination>[
+      ..._studentItems,
+      if (canTeach) ...const [
+        _SidebarDestination('My courses', '/teacher/courses', Icons.menu_book_outlined),
+        _SidebarDestination('Analytics', '/teacher/analytics', Icons.analytics_outlined),
+        _SidebarDestination('Host a meeting', '/teacher/meet', Icons.video_call_outlined),
+      ],
+    ];
 
-    // Always student routes only — teacher mode removed
-    const activeRoutes = studentRoutes;
-
-    return Container(
-      width: isCollapsed ? 76 : 260,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: isDark
-              ? [const Color(0xFF131720), const Color(0xFF0C0E14)]
-              : [Colors.white, const Color(0xFFF8FAFC)],
+    return Material(
+      color: scheme.surface,
+      child: SizedBox(
+        width: isCollapsed ? 76 : 286,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 64,
+              child: Column(
+                children: [
+                  const SizedBox(height: 16),
+                  _BrandMark(isDark: isDark),
+                  const SizedBox(height: 26),
+                  Expanded(
+                    child: ListView.builder(
+                      padding: EdgeInsets.zero,
+                      itemCount: destinations.length,
+                      itemBuilder: (context, index) {
+                        final item = destinations[index];
+                        return _RailButton(
+                          icon: item.icon,
+                          label: item.label,
+                          selected: _isActive(item.route),
+                          selectedColor: selected,
+                          foregroundColor: selectedForeground,
+                          idleColor: scheme.onSurfaceVariant,
+                          onTap: () => _go(context, item.route),
+                        );
+                      },
+                    ),
+                  ),
+                  Container(
+                    width: 34,
+                    height: 1,
+                    color: scheme.outlineVariant.withValues(alpha: 0.8),
+                    margin: const EdgeInsets.only(bottom: 12),
+                  ),
+                  _RailButton(
+                    icon: Icons.settings_outlined,
+                    label: 'Settings',
+                    selected: _isActive('/profile'),
+                    selectedColor: selected,
+                    foregroundColor: selectedForeground,
+                    idleColor: scheme.onSurfaceVariant,
+                    onTap: () => _go(context, '/profile'),
+                  ),
+                  _RailButton(
+                    icon: Icons.notifications_none_rounded,
+                    label: 'Notifications',
+                    selected: _isActive('/notifications'),
+                    selectedColor: selected,
+                    foregroundColor: selectedForeground,
+                    idleColor: scheme.onSurfaceVariant,
+                    onTap: () => _go(context, '/notifications'),
+                  ),
+                  const SizedBox(height: 7),
+                  Tooltip(
+                    message: isDark ? 'Switch to light theme' : 'Switch to dark theme',
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: const ThemeToggleButton(isCompact: true),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _SidebarAvatar(user: user, onTap: () => _go(context, '/profile')),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+            if (!isCollapsed) ...[
+              VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant.withValues(alpha: 0.75)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 24, 14, 20),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Termini',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          Icon(Icons.expand_more_rounded, size: 19, color: scheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        children: [
+                          for (final item in destinations)
+                            _SidebarNavItem(
+                              item: item,
+                              selected: _isActive(item.route),
+                              selectedColor: selected,
+                              foregroundColor: selectedForeground,
+                              idleColor: scheme.onSurfaceVariant,
+                              onTap: () => _go(context, item.route),
+                            ),
+                          const SizedBox(height: 12),
+                          Divider(color: scheme.outlineVariant.withValues(alpha: 0.8)),
+                          _SidebarNavItem(
+                            item: const _SidebarDestination('Notifications', '/notifications', Icons.notifications_none_rounded),
+                            selected: _isActive('/notifications'),
+                            selectedColor: selected,
+                            foregroundColor: selectedForeground,
+                            idleColor: scheme.onSurfaceVariant,
+                            onTap: () => _go(context, '/notifications'),
+                          ),
+                          _SidebarNavItem(
+                            item: const _SidebarDestination('Settings', '/profile', Icons.settings_outlined),
+                            selected: _isActive('/profile'),
+                            selectedColor: selected,
+                            foregroundColor: selectedForeground,
+                            idleColor: scheme.onSurfaceVariant,
+                            onTap: () => _go(context, '/profile'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                      child: _ExploreCard(
+                        isDark: isDark,
+                        onTap: () => _go(context, '/search'),
+                      ),
+                    ),
+                    _AccountFooter(
+                      user: user,
+                      onTap: () => _go(context, '/profile'),
+                      onSignOut: () async {
+                        await ref.read(authControllerProvider.notifier).signOut();
+                        if (context.mounted) context.go('/sign-in');
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
-        border: Border(
-          right: BorderSide(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.08)
-                : Colors.black.withValues(alpha: 0.08),
-            width: 1,
+      ),
+    );
+  }
+}
+
+class _SidebarDestination {
+  final String label;
+  final String route;
+  final IconData icon;
+
+  const _SidebarDestination(this.label, this.route, this.icon);
+}
+
+class _BrandMark extends StatelessWidget {
+  final bool isDark;
+  const _BrandMark({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = isDark ? Colors.white : const Color(0xFF111111);
+    final ink = isDark ? const Color(0xFF111111) : Colors.white;
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(12)),
+      child: Icon(Icons.school_rounded, size: 21, color: ink),
+    );
+  }
+}
+
+class _RailButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final Color selectedColor;
+  final Color foregroundColor;
+  final Color idleColor;
+  final VoidCallback onTap;
+
+  const _RailButton({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.selectedColor,
+    required this.foregroundColor,
+    required this.idleColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 5),
+    child: Tooltip(
+      message: label,
+      child: Material(
+        color: selected ? selectedColor : Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Icon(icon, size: 21, color: selected ? foregroundColor : idleColor),
           ),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 1. Stylish Brand Header
-          Container(
-            height: 70,
-            padding: EdgeInsets.symmetric(horizontal: isCollapsed ? 12 : 20),
-            alignment: isCollapsed ? Alignment.center : Alignment.centerLeft,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0284C7), Color(0xFF38BDF8)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF0284C7).withValues(alpha: 0.35),
-                        blurRadius: 14,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.school_rounded,
-                    size: 22,
-                    color: Colors.white,
-                  ),
-                ),
-                if (!isCollapsed) ...[
-                  const SizedBox(width: 14),
+    ),
+  );
+}
+
+class _SidebarNavItem extends StatelessWidget {
+  final _SidebarDestination item;
+  final bool selected;
+  final Color selectedColor;
+  final Color foregroundColor;
+  final Color idleColor;
+  final VoidCallback onTap;
+
+  const _SidebarNavItem({
+    required this.item,
+    required this.selected,
+    required this.selectedColor,
+    required this.foregroundColor,
+    required this.idleColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final textStyle = Theme.of(context).textTheme.labelLarge;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: selected ? selectedColor : Colors.transparent,
+        borderRadius: BorderRadius.circular(24),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(24),
+          child: SizedBox(
+            height: 42,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(item.icon, size: 19, color: selected ? foregroundColor : idleColor),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              'TERMINI',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.2,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [
-                                    colorScheme.primary.withValues(alpha: 0.2),
-                                    colorScheme.secondary.withValues(
-                                      alpha: 0.1,
-                                    ),
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: colorScheme.primary.withValues(
-                                    alpha: 0.4,
-                                  ),
-                                  width: 0.8,
-                                ),
-                              ),
-                              child: Text(
-                                'LMS',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.6,
-                                  color: colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          'Learning Platform',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant.withValues(
-                              alpha: 0.8,
-                            ),
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textStyle?.copyWith(
+                        color: selected ? foregroundColor : idleColor,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
 
-          Divider(
-            height: 1,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.black.withValues(alpha: 0.06),
-          ),
+class _SidebarAvatar extends StatelessWidget {
+  final UserEntity? user;
+  final VoidCallback onTap;
+  const _SidebarAvatar({required this.user, required this.onTap});
 
-          // 3. Navigation Links Section
-          Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: isCollapsed ? 8 : 14,
-              vertical: 6,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (!isCollapsed)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8, top: 4, bottom: 8),
-                    child: Text(
-                      'LEARNING SUITE',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.4,
-                        color: colorScheme.onSurfaceVariant.withValues(
-                          alpha: 0.8,
-                        ),
-                      ),
-                    ),
-                  ),
-                ...activeRoutes.map((item) {
-                  final isActive =
-                      currentRoute == item.route ||
-                      (item.route != '/' &&
-                          currentRoute.startsWith(item.route));
+  @override
+  Widget build(BuildContext context) {
+    final initial = user?.firstName?.isNotEmpty == true
+        ? user!.firstName![0].toUpperCase()
+        : (user?.email.isNotEmpty == true ? user!.email[0].toUpperCase() : 'U');
+    return Tooltip(
+      message: user?.fullName ?? 'Profile',
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: CircleAvatar(
+          radius: 18,
+          backgroundColor: Theme.of(context).colorScheme.secondary,
+          backgroundImage: user?.imageUrl?.isNotEmpty == true
+              ? CachedNetworkImageProvider(user!.imageUrl!)
+              : null,
+          child: user?.imageUrl?.isNotEmpty == true
+              ? null
+              : Text(initial, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+      ),
+    );
+  }
+}
 
-                  return Container(
-                    margin: const EdgeInsets.symmetric(vertical: 3),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () {
-                        onNavigate?.call();
-                        context.go(item.route);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 11,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isActive
-                              ? colorScheme.primary.withValues(
-                                  alpha: isDark ? 0.14 : 0.08,
-                                )
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isActive
-                                ? colorScheme.primary.withValues(alpha: 0.3)
-                                : Colors.transparent,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: isCollapsed
-                              ? MainAxisAlignment.center
-                              : MainAxisAlignment.start,
-                          children: [
-                            if (isActive && !isCollapsed) ...[
-                              Container(
-                                width: 3.5,
-                                height: 18,
-                                margin: const EdgeInsets.only(right: 10),
-                                decoration: BoxDecoration(
-                                  color: colorScheme.primary,
-                                  borderRadius: BorderRadius.circular(3),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: colorScheme.primary.withValues(
-                                        alpha: 0.6,
-                                      ),
-                                      blurRadius: 6,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                            Icon(
-                              isActive
-                                  ? (item.activeIcon ?? item.icon)
-                                  : item.icon,
-                              size: 20,
-                              color: isActive
-                                  ? colorScheme.primary
-                                  : colorScheme.onSurfaceVariant,
-                            ),
-                            if (!isCollapsed) ...[
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  item.label,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: isActive
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
-                                    color: isActive
-                                        ? (isDark
-                                              ? Colors.white
-                                              : Colors.black87)
-                                        : colorScheme.onSurfaceVariant,
-                                    fontSize: 13.5,
-                                  ),
-                                ),
-                              ),
-                              if (item.badge != null) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        (item.badgeColor ?? colorScheme.primary)
-                                            .withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color:
-                                          (item.badgeColor ??
-                                                  colorScheme.primary)
-                                              .withValues(alpha: 0.4),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    item.badge!,
-                                    style: TextStyle(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.6,
-                                      color:
-                                          item.badgeColor ??
-                                          colorScheme.primary,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }),
+class _ExploreCard extends StatelessWidget {
+  final bool isDark;
+  final VoidCallback onTap;
+  const _ExploreCard({required this.isDark, required this.onTap});
 
-                // Direct Settings Item in Sidebar
-                Container(
-                  margin: const EdgeInsets.symmetric(vertical: 3),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () {
-                      onNavigate?.call();
-                      context.go('/profile');
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 11,
-                      ),
-                      decoration: BoxDecoration(
-                        color: currentRoute == '/profile'
-                            ? colorScheme.primary.withValues(
-                                alpha: isDark ? 0.14 : 0.08,
-                              )
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: currentRoute == '/profile'
-                              ? colorScheme.primary.withValues(alpha: 0.3)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: isCollapsed
-                            ? MainAxisAlignment.center
-                            : MainAxisAlignment.start,
-                        children: [
-                          if (currentRoute == '/profile' && !isCollapsed) ...[
-                            Container(
-                              width: 3.5,
-                              height: 18,
-                              margin: const EdgeInsets.only(right: 10),
-                              decoration: BoxDecoration(
-                                color: colorScheme.primary,
-                                borderRadius: BorderRadius.circular(3),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: colorScheme.primary.withValues(
-                                      alpha: 0.6,
-                                    ),
-                                    blurRadius: 6,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                          Icon(
-                            currentRoute == '/profile'
-                                ? Icons.settings_rounded
-                                : Icons.settings_outlined,
-                            size: 20,
-                            color: currentRoute == '/profile'
-                                ? colorScheme.primary
-                                : colorScheme.onSurfaceVariant,
-                          ),
-                          if (!isCollapsed) ...[
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Settings & Account',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: currentRoute == '/profile'
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  color: currentRoute == '/profile'
-                                      ? (isDark ? Colors.white : Colors.black87)
-                                      : colorScheme.onSurfaceVariant,
-                                  fontSize: 13.5,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: isDark ? scheme.surfaceContainerHighest : const Color(0xFFF4F4F4),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Keep learning', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+              const SizedBox(height: 3),
+              Text('Find your next course', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 32,
+                child: FilledButton.icon(
+                  onPressed: onTap,
+                  icon: const Icon(Icons.explore_outlined, size: 15),
+                  label: const Text('Explore', style: TextStyle(fontSize: 11)),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: isDark ? Colors.white : const Color(0xFF111111),
+                    foregroundColor: isDark ? const Color(0xFF111111) : Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
                   ),
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountFooter extends StatelessWidget {
+  final UserEntity? user;
+  final VoidCallback onTap;
+  final Future<void> Function() onSignOut;
+  const _AccountFooter({required this.user, required this.onTap, required this.onSignOut});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final name = user?.fullName ?? 'Guest User';
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 14),
+      decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.75)))),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    Text(user?.isTeacher == true ? 'Instructor' : 'Student', style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+                  ],
+                ),
+              ),
             ),
           ),
-
-          const Spacer(),
-
-          // 4. Premium User Profile Footer
-          Divider(
-            height: 1,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.06)
-                : Colors.black.withValues(alpha: 0.06),
-          ),
-          _SidebarProfileCard(
-            currentUser: currentUser,
-            canTeach: canTeach,
-            isCollapsed: isCollapsed,
-            isDark: isDark,
-            colorScheme: colorScheme,
-            onNavigate: onNavigate,
-            onProfileTap: () {
-              onNavigate?.call();
-              context.go('/profile');
-            },
-            onSignOut: () async {
-              await ref.read(authControllerProvider.notifier).signOut();
-              if (context.mounted) context.go('/sign-in');
-            },
+          IconButton(
+            tooltip: 'Sign out',
+            visualDensity: VisualDensity.compact,
+            onPressed: onSignOut,
+            icon: const Icon(Icons.logout_rounded, size: 18),
           ),
         ],
       ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────
-//  Premium sidebar profile card
-// ──────────────────────────────────────────────────────────────────────
-
-class _SidebarProfileCard extends StatefulWidget {
-  final UserEntity? currentUser;
-  final bool canTeach;
-  final bool isCollapsed;
-  final bool isDark;
-  final ColorScheme colorScheme;
-  final VoidCallback? onNavigate;
-  final VoidCallback onProfileTap;
-  final Future<void> Function() onSignOut;
-
-  const _SidebarProfileCard({
-    required this.currentUser,
-    required this.canTeach,
-    required this.isCollapsed,
-    required this.isDark,
-    required this.colorScheme,
-    required this.onNavigate,
-    required this.onProfileTap,
-    required this.onSignOut,
-  });
-
-  @override
-  State<_SidebarProfileCard> createState() => _SidebarProfileCardState();
-}
-
-class _SidebarProfileCardState extends State<_SidebarProfileCard> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final user = widget.currentUser;
-    final initials = user?.firstName?.isNotEmpty == true
-        ? user!.firstName![0].toUpperCase()
-        : (user?.email.isNotEmpty == true ? user!.email[0].toUpperCase() : 'U');
-
-    final bgColor = widget.isDark ? const Color(0xFF131720) : Colors.white;
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        widget.isCollapsed ? 8 : 12,
-        8,
-        widget.isCollapsed ? 8 : 12,
-        12,
-      ),
-      child: widget.isCollapsed
-          // Collapsed: just show avatar
-          ? GestureDetector(
-              onTap: widget.onProfileTap,
-              child: Center(
-                child: Stack(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: user?.imageUrl == null
-                            ? LinearGradient(
-                                colors: widget.canTeach
-                                    ? [
-                                        const Color(0xFF8B5CF6),
-                                        const Color(0xFF6366F1),
-                                      ]
-                                    : [
-                                        const Color(0xFF0284C7),
-                                        const Color(0xFF38BDF8),
-                                      ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              )
-                            : null,
-                        boxShadow: [
-                          BoxShadow(
-                            color:
-                                (widget.canTeach
-                                        ? const Color(0xFF8B5CF6)
-                                        : const Color(0xFF0284C7))
-                                    .withValues(alpha: 0.4),
-                            blurRadius: 14,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: user?.imageUrl != null
-                          ? ClipOval(
-                              child: CachedNetworkImage(
-                                imageUrl: user!.imageUrl!,
-                                width: 40,
-                                height: 40,
-                                memCacheWidth: 120,
-                                memCacheHeight: 120,
-                                fit: BoxFit.cover,
-                                errorWidget: (_, _, _) => Center(
-                                  child: Text(
-                                    initials,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            )
-                          : Center(
-                              child: Text(
-                                initials,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ),
-                    ),
-                    Positioned(
-                      bottom: 1,
-                      right: 1,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: bgColor, width: 2),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          // Expanded: full profile card
-          : MouseRegion(
-              onEnter: (_) => setState(() => _hovered = true),
-              onExit: (_) => setState(() => _hovered = false),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: _hovered
-                      ? (widget.isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.04))
-                      : (widget.isDark
-                            ? Colors.white.withValues(alpha: 0.03)
-                            : Colors.black.withValues(alpha: 0.02)),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: _hovered
-                        ? widget.colorScheme.primary.withValues(alpha: 0.2)
-                        : widget.isDark
-                        ? Colors.white.withValues(alpha: 0.07)
-                        : Colors.black.withValues(alpha: 0.06),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    // Top row: avatar + info + logout
-                    Row(
-                      children: [
-                        // Avatar
-                        GestureDetector(
-                          onTap: widget.onProfileTap,
-                          child: Stack(
-                            children: [
-                              Container(
-                                width: 40,
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: user?.imageUrl == null
-                                      ? LinearGradient(
-                                          colors: widget.canTeach
-                                              ? [
-                                                  const Color(0xFF8B5CF6),
-                                                  const Color(0xFF6366F1),
-                                                ]
-                                              : [
-                                                  const Color(0xFF0284C7),
-                                                  const Color(0xFF38BDF8),
-                                                ],
-                                          begin: Alignment.topLeft,
-                                          end: Alignment.bottomRight,
-                                        )
-                                      : null,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color:
-                                          (widget.canTeach
-                                                  ? const Color(0xFF8B5CF6)
-                                                  : const Color(0xFF0284C7))
-                                              .withValues(alpha: 0.4),
-                                      blurRadius: 14,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
-                                ),
-                                child: user?.imageUrl != null
-                                    ? ClipOval(
-                                        child: CachedNetworkImage(
-                                          imageUrl: user!.imageUrl!,
-                                          width: 40,
-                                          height: 40,
-                                          memCacheWidth: 120,
-                                          memCacheHeight: 120,
-                                          fit: BoxFit.cover,
-                                          errorWidget: (_, _, _) => Center(
-                                            child: Text(
-                                              initials,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      )
-                                    : Center(
-                                        child: Text(
-                                          initials,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 15,
-                                          ),
-                                        ),
-                                      ),
-                              ),
-                              // Online dot
-                              Positioned(
-                                bottom: 0,
-                                right: 0,
-                                child: Container(
-                                  width: 11,
-                                  height: 11,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF10B981),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: bgColor,
-                                      width: 2,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        // Name + email + badge
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: widget.onProfileTap,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  user?.fullName ?? 'Guest User',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: widget.isDark
-                                        ? Colors.white
-                                        : const Color(0xFF0F172A),
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (user?.email != null) ...[
-                                  const SizedBox(height: 1),
-                                  Text(
-                                    user!.email,
-                                    style: TextStyle(
-                                      fontSize: 10.5,
-                                      color: widget.colorScheme.onSurfaceVariant
-                                          .withValues(alpha: 0.75),
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                                const SizedBox(height: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 7,
-                                    vertical: 2,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: widget.canTeach
-                                          ? [
-                                              const Color(0xFF8B5CF6)
-                                                  .withValues(alpha: 0.25),
-                                              const Color(0xFF6366F1)
-                                                  .withValues(alpha: 0.15),
-                                            ]
-                                          : [
-                                              const Color(0xFF0284C7)
-                                                  .withValues(alpha: 0.25),
-                                              const Color(0xFF38BDF8)
-                                                  .withValues(alpha: 0.15),
-                                            ],
-                                    ),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: widget.canTeach
-                                          ? const Color(0xFF8B5CF6)
-                                                .withValues(alpha: 0.35)
-                                          : const Color(0xFF0284C7)
-                                                .withValues(alpha: 0.35),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    widget.canTeach
-                                        ? '✦ INSTRUCTOR'
-                                        : '✦ STUDENT',
-                                    style: TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.6,
-                                      color: widget.canTeach
-                                          ? const Color(0xFFA78BFA)
-                                          : const Color(0xFF38BDF8),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        // Log out icon
-                        const SizedBox(width: 6),
-                        GestureDetector(
-                          onTap: widget.onSignOut,
-                          child: Tooltip(
-                            message: 'Sign out',
-                            child: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFEF4444)
-                                    .withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(9),
-                                border: Border.all(
-                                  color: const Color(0xFFEF4444)
-                                      .withValues(alpha: 0.25),
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.logout_rounded,
-                                size: 15,
-                                color: Color(0xFFEF4444),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    // Stats mini-row
-                    if (user != null) ...[
-                      const SizedBox(height: 10),
-                      Container(
-                        height: 1,
-                        color: widget.isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.06),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _StatChip(
-                            label: 'Courses',
-                            value: '${user.stats.enrolledCoursesCount}',
-                            icon: Icons.menu_book_rounded,
-                            color: const Color(0xFF0284C7),
-                            isDark: widget.isDark,
-                          ),
-                          Container(
-                            width: 1,
-                            height: 28,
-                            color: widget.isDark
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : Colors.black.withValues(alpha: 0.06),
-                          ),
-                          _StatChip(
-                            label: 'Hours',
-                            value: user.stats.hoursLearned.toStringAsFixed(1),
-                            icon: Icons.schedule_rounded,
-                            color: const Color(0xFF10B981),
-                            isDark: widget.isDark,
-                          ),
-                          Container(
-                            width: 1,
-                            height: 28,
-                            color: widget.isDark
-                                ? Colors.white.withValues(alpha: 0.08)
-                                : Colors.black.withValues(alpha: 0.06),
-                          ),
-                          _StatChip(
-                            label: 'Certs',
-                            value: '${user.stats.certificatesCount}',
-                            icon: Icons.workspace_premium_rounded,
-                            color: const Color(0xFFF59E0B),
-                            isDark: widget.isDark,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  final String label;
-  final String value;
-  final IconData icon;
-  final Color color;
-  final bool isDark;
-
-  const _StatChip({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.color,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: color),
-            const SizedBox(width: 4),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w500,
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.5)
-                : Colors.black.withValues(alpha: 0.45),
-          ),
-        ),
-      ],
     );
   }
 }

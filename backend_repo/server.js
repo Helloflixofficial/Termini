@@ -4,11 +4,16 @@ const path = require('path');
 const crypto = require('crypto');
 const { verifyToken } = require('@clerk/backend');
 const { AccessToken } = require('livekit-server-sdk');
+const Stripe = require('stripe');
+const { cert, getApps, initializeApp } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const VIDEO_ACCESS_CACHE_TTL_MS = 15000;
 const MAX_VIDEO_ACCESS_CACHE_ENTRIES = 5000;
 const videoAccessCache = new Map();
+let stripeClient;
+let firebaseMessagingClient = null;
 
 // ─── Load .env manually (no dotenv dep required) ─────────────────────────────
 const envPath = path.join(__dirname, '.env');
@@ -31,6 +36,106 @@ if (fs.existsSync(envPath)) {
 
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const isProduction = process.env.NODE_ENV === 'production';
+
+function getStripeClient() {
+  const apiKey = process.env.STRIPE_API_KEY;
+  if (!apiKey || !/^sk_(test|live)_/.test(apiKey)) {
+    const error = new Error('Stripe is not configured');
+    error.code = 'STRIPE_NOT_CONFIGURED';
+    throw error;
+  }
+  if (!stripeClient) stripeClient = new Stripe(apiKey);
+  return stripeClient;
+}
+
+function getFirebaseMessagingClient() {
+  if (firebaseMessagingClient) return firebaseMessagingClient;
+  const encoded = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+  if (!encoded) return null;
+  try {
+    const credentials = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
+    if (!credentials.project_id || !credentials.client_email || !credentials.private_key) {
+      throw new Error('Firebase service account fields are incomplete');
+    }
+    const appName = `termini-${credentials.project_id}`;
+    const app = getApps().find(candidate => candidate.name === appName) ||
+      initializeApp({ credential: cert(credentials) }, appName);
+    firebaseMessagingClient = getMessaging(app);
+    return firebaseMessagingClient;
+  } catch (error) {
+    const configurationError = new Error('Firebase service account configuration is invalid');
+    configurationError.code = 'FIREBASE_CONFIG_INVALID';
+    throw configurationError;
+  }
+}
+
+async function sendCommunityPostPush(post) {
+  const messaging = getFirebaseMessagingClient();
+  if (!messaging) return false;
+  return messaging.send({
+    topic: 'community_students',
+    notification: {
+      title: 'New post from Termini',
+      body: 'A teacher shared a new post in Community. Open Termini to read it.',
+    },
+    data: {
+      type: 'community_post',
+      postId: String(post.id),
+      route: '/notifications',
+    },
+    android: { priority: 'high', notification: { channelId: 'community_posts' } },
+  });
+}
+
+async function recordCoursePurchase(userId, courseId) {
+  await dbQuery(
+    `INSERT INTO "Purchase" ("id", "userId", "courseId", "createdAt", "updatedAt")
+     VALUES ($1, $2, $3, NOW(), NOW())
+     ON CONFLICT ("userId", "courseId") DO NOTHING`,
+    [crypto.randomUUID(), userId, courseId],
+  );
+}
+
+async function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const contentLength = Number.parseInt(req.headers['content-length'] || '0', 10);
+    if (contentLength > MAX_BODY_BYTES) {
+      const error = new Error('Request body is too large');
+      error.statusCode = 413;
+      req.resume();
+      reject(error);
+      return;
+    }
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        if (!settled) {
+          settled = true;
+          const error = new Error('Request body is too large');
+          error.statusCode = 413;
+          reject(error);
+          req.resume();
+        }
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on('error', error => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+  });
+}
 
 // ─── Real Neon PostgreSQL connection ─────────────────────────────────────────
 const { Pool } = require('pg');
@@ -775,6 +880,38 @@ async function handleRequest(req, res) {
     return sendCors(res);
   }
 
+  // Stripe calls this public endpoint directly. Verify the signature against
+  // the untouched request bytes before recording any paid enrollment.
+  if (pathname === '/api/webhook' && method === 'POST') {
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      return sendJson(res, 503, { error: 'Stripe webhook is not configured' });
+    }
+    const signature = req.headers['stripe-signature'];
+    if (typeof signature !== 'string' || !signature) {
+      return sendJson(res, 400, { error: 'Missing Stripe signature' });
+    }
+    try {
+      const event = getStripeClient().webhooks.constructEvent(
+        await readRawBody(req),
+        signature,
+        process.env.STRIPE_WEBHOOK_SECRET,
+      );
+      if (event.type === 'checkout.session.completed' ||
+          event.type === 'checkout.session.async_payment_succeeded') {
+        const session = event.data.object;
+        const userId = session.metadata?.userId;
+        const courseId = session.metadata?.courseId;
+        if (session.mode === 'payment' && session.payment_status === 'paid' && userId && courseId) {
+          await recordCoursePurchase(userId, courseId);
+        }
+      }
+      return sendJson(res, 200, { received: true });
+    } catch (error) {
+      console.error('[Stripe Webhook] Rejected event:', error.code || error.name || 'verification error');
+      return sendJson(res, error.statusCode || 400, { error: 'Unable to verify Stripe event' });
+    }
+  }
+
   let userId;
   try {
     userId = await resolveUserId(req);
@@ -1142,21 +1279,111 @@ async function handleRequest(req, res) {
 
   }
 
-  // 11. Checkout Endpoint (POST /api/courses/:courseId/checkout)
+  // Confirm a completed Stripe Checkout session when the mobile app returns.
+  const verifyCheckoutMatch = pathname.match(/^\/api\/courses\/([^\/]+)\/checkout\/verify$/);
+  if (verifyCheckoutMatch && method === 'POST') {
+    const courseId = verifyCheckoutMatch[1];
+    try {
+      const body = await parseBody(req);
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (!/^cs_(test|live)_[A-Za-z0-9]+$/.test(sessionId)) {
+        return sendJson(res, 400, { error: 'Invalid checkout session' });
+      }
+
+      const existing = await dbQuery(
+        'SELECT "id" FROM "Purchase" WHERE "userId" = $1 AND "courseId" = $2 LIMIT 1',
+        [userId, courseId],
+      );
+      if (existing.length > 0) return sendJson(res, 200, { enrolled: true });
+
+      const session = await getStripeClient().checkout.sessions.retrieve(sessionId);
+      const sessionUserId = session.metadata?.userId;
+      const sessionCourseId = session.metadata?.courseId;
+      if (session.mode !== 'payment' || session.status !== 'complete' ||
+          session.payment_status !== 'paid' || sessionUserId !== userId ||
+          sessionCourseId !== courseId || session.client_reference_id !== userId) {
+        return sendJson(res, 200, { enrolled: false });
+      }
+
+      await recordCoursePurchase(userId, courseId);
+      return sendJson(res, 200, { enrolled: true });
+    } catch (error) {
+      console.error('[Checkout Verify] Failed:', error.code || error.name || 'unknown error');
+      return sendJson(res, error.code === 'STRIPE_NOT_CONFIGURED' ? 503 : 500,
+        { error: 'Unable to verify payment' });
+    }
+  }
+
+  // Create Stripe-hosted checkout; purchases are recorded only after Stripe confirms payment.
   const checkoutMatch = pathname.match(/^\/api\/courses\/([^\/]+)\/checkout$/);
   if (checkoutMatch && method === 'POST') {
-    if (isProduction) {
-      return sendJson(res, 501, { error: 'Checkout is not configured on this API server' });
-    }
     const courseId = checkoutMatch[1];
-    if (!purchases[userId]) {
-      purchases[userId] = new Set();
+    try {
+      const courseRows = await dbQuery(
+        `SELECT c."id", c."title", c."description", c."price", c."isPublished",
+                EXISTS(SELECT 1 FROM "Purchase" p WHERE p."courseId" = c."id" AND p."userId" = $2) AS "isPurchased",
+                EXISTS(SELECT 1 FROM "Chapter" ch WHERE ch."courseId" = c."id" AND ch."isPublished" = true) AS "hasPublishedChapters"
+         FROM "title" c WHERE c."id" = $1 AND c."isPublished" = true LIMIT 1`,
+        [courseId, userId],
+      );
+      const course = courseRows[0];
+      if (!course) return sendJson(res, 404, { error: 'Course not found or not published' });
+      if (course.isPurchased) return sendJson(res, 409, { error: 'Already enrolled' });
+      if (!course.hasPublishedChapters) {
+        return sendJson(res, 409, { error: 'This course is not ready for enrollment yet' });
+      }
+
+      const price = Number(course.price);
+      if (!Number.isFinite(price) || price < 0) {
+        return sendJson(res, 409, { error: 'Course price is not valid' });
+      }
+      if (price === 0) {
+        await recordCoursePurchase(userId, courseId);
+        return sendJson(res, 200, { enrolled: true, free: true });
+      }
+
+      const currency = (process.env.STRIPE_CURRENCY || 'usd').toLowerCase();
+      if (!/^[a-z]{3}$/.test(currency)) {
+        return sendJson(res, 503, { error: 'Payment currency is not configured correctly' });
+      }
+      const amountInMinorUnits = Math.round(price * 100);
+      if (!Number.isSafeInteger(amountInMinorUnits) || amountInMinorUnits <= 0) {
+        return sendJson(res, 409, { error: 'Course price cannot be charged' });
+      }
+
+      await parseBody(req);
+      const appReturnUrl = `termini://course/${encodeURIComponent(courseId)}`;
+      const session = await getStripeClient().checkout.sessions.create({
+        mode: 'payment',
+        client_reference_id: userId,
+        line_items: [{
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: amountInMinorUnits,
+            product_data: {
+              name: String(course.title).slice(0, 250),
+              ...(course.description ? { description: String(course.description).slice(0, 500) } : {}),
+            },
+          },
+        }],
+        success_url: `${appReturnUrl}?success=1&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appReturnUrl}?canceled=1`,
+        metadata: { userId, courseId },
+        payment_intent_data: { metadata: { userId, courseId } },
+      });
+      if (!session.url) return sendJson(res, 502, { error: 'Stripe did not return a checkout URL' });
+      return sendJson(res, 200, { url: session.url, enrolled: false });
+    } catch (error) {
+      console.error('[Checkout] Session creation failed:', error.code || error.name || 'unknown error');
+      const status = error.code === 'STRIPE_NOT_CONFIGURED' ? 503 :
+        (error.statusCode === 413 ? 413 : 502);
+      return sendJson(res, status, {
+        error: error.code === 'STRIPE_NOT_CONFIGURED'
+          ? 'Stripe payments are not configured on the server'
+          : 'Unable to start secure checkout',
+      });
     }
-    purchases[userId].add(courseId);
-    return sendJson(res, 200, {
-      url: `https://checkout.stripe.com/test_session?courseId=${courseId}`,
-      success: true,
-    });
   }
 
   // 12. Teacher Courses — real from DB
@@ -1489,6 +1716,13 @@ async function handleRequest(req, res) {
          RETURNING "id", "title", "content", "authorId", "ownerId", "spaceId", "isPinned", "isAnnouncement", "isApproved", "createdAt", "authorName", "authorImageUrl"`,
         [crypto.randomUUID(), title, content, userId, ownerId, spaceId, isApproved, authorName, authorImageUrl],
       );
+      if (isTeacher && isApproved) {
+        void sendCommunityPostPush(rows[0]).then(sent => {
+          if (!sent) console.warn('[Community Push] skipped; Firebase service account is not configured');
+        }).catch(error => {
+          console.error('[Community Push] delivery failed:', error.code || error.message || 'unknown error');
+        });
+      }
       return sendJson(res, 201, {
         ...rows[0],
         likesCount: 0,

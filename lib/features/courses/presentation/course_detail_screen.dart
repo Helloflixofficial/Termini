@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/empty_state.dart';
@@ -9,6 +10,7 @@ import '../../../core/widgets/responsive_layout.dart';
 import '../../../core/widgets/skeleton_loader.dart';
 import '../data/course_repository.dart';
 import '../domain/course_entity.dart';
+import '../../dashboard/presentation/dashboard_controller.dart';
 
 final courseDetailProvider = FutureProvider.autoDispose
     .family<CourseEntity, String>((ref, courseId) async {
@@ -248,24 +250,34 @@ class CourseDetailScreen extends ConsumerWidget {
                                   ),
                                 ],
                                 const SizedBox(height: 24),
-                                Row(
-                                  children: [
-                                    if (firstChapter != null)
-                                      Expanded(
-                                        child: FilledButton.icon(
-                                          onPressed: () {
-                                            context.push(
-                                              '/course/${course.id}/chapters/${firstChapter.id}',
-                                            );
-                                          },
+                                if (!course.isPurchased &&
+                                    firstChapter != null) ...[
+                                  _EnrollCourseButton(
+                                    courseId: course.id,
+                                    price: course.price,
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: firstChapter == null
+                                      ? OutlinedButton(
+                                          onPressed: null,
+                                          child: const Text(
+                                            'No chapters published yet',
+                                          ),
+                                        )
+                                      : course.isPurchased
+                                      ? FilledButton.icon(
+                                          onPressed: () => context.push(
+                                            '/course/${course.id}/chapters/${firstChapter.id}',
+                                          ),
                                           icon: const Icon(
                                             Icons.play_arrow_rounded,
                                             size: 22,
                                           ),
-                                          label: Text(
-                                            course.isPurchased
-                                                ? 'Continue Learning'
-                                                : 'Start Learning Now',
+                                          label: const Text(
+                                            'Continue Learning',
                                             style: TextStyle(
                                               fontWeight: FontWeight.bold,
                                               fontSize: 15,
@@ -280,27 +292,18 @@ class CourseDetailScreen extends ConsumerWidget {
                                                   BorderRadius.circular(12),
                                             ),
                                           ),
-                                        ),
-                                      )
-                                    else
-                                      Expanded(
-                                        child: OutlinedButton(
-                                          onPressed: null,
-                                          style: OutlinedButton.styleFrom(
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 16,
-                                            ),
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
+                                        )
+                                      : OutlinedButton.icon(
+                                          onPressed: () => context.push(
+                                            '/course/${course.id}/chapters/${firstChapter.id}',
                                           ),
-                                          child: const Text(
-                                            'No chapters published yet',
+                                          icon: const Icon(
+                                            Icons.play_circle_outline_rounded,
+                                          ),
+                                          label: const Text(
+                                            'Preview first lesson',
                                           ),
                                         ),
-                                      ),
-                                  ],
                                 ),
                               ],
                             ),
@@ -425,6 +428,90 @@ class CourseDetailScreen extends ConsumerWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _EnrollCourseButton extends ConsumerStatefulWidget {
+  final String courseId;
+  final double? price;
+
+  const _EnrollCourseButton({required this.courseId, required this.price});
+
+  @override
+  ConsumerState<_EnrollCourseButton> createState() =>
+      _EnrollCourseButtonState();
+}
+
+class _EnrollCourseButtonState extends ConsumerState<_EnrollCourseButton> {
+  bool _isStartingCheckout = false;
+
+  Future<void> _startCheckout() async {
+    setState(() => _isStartingCheckout = true);
+    try {
+      final result = await ref
+          .read(courseRepositoryProvider)
+          .createCheckoutSession(
+            widget.courseId,
+            returnUrl:
+                'termini://course/${Uri.encodeComponent(widget.courseId)}',
+          );
+      if (result.enrolled) {
+        ref.invalidate(dashboardControllerProvider);
+        ref.invalidate(courseDetailProvider(widget.courseId));
+        if (mounted) context.go('/');
+        return;
+      }
+
+      final checkoutUrl = result.checkoutUrl;
+      final uri = checkoutUrl == null ? null : Uri.tryParse(checkoutUrl);
+      if (uri == null || !uri.hasAuthority || !uri.scheme.startsWith('http')) {
+        throw Exception(
+          'The server did not return a valid Stripe checkout link.',
+        );
+      }
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw Exception('Could not open Stripe Checkout.');
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start checkout: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isStartingCheckout = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isFree = widget.price == null || widget.price == 0;
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton.icon(
+        onPressed: _isStartingCheckout ? null : _startCheckout,
+        icon: _isStartingCheckout
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.lock_outline_rounded),
+        label: Text(
+          _isStartingCheckout
+              ? 'Preparing secure checkout…'
+              : isFree
+              ? 'Enroll for Free'
+              : 'Enroll for \$${widget.price!.toStringAsFixed(2)}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+        ),
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       ),
     );
   }

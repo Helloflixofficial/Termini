@@ -1,28 +1,32 @@
+import 'dart:convert';
+
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_player/video_player.dart';
 
-class MuxVideoPlayer extends StatefulWidget {
+import '../../../../core/config/env.dart';
+import '../../../../core/network/api_client.dart';
+
+class UploadThingVideoPlayer extends ConsumerStatefulWidget {
   final String? chapterId;
-  final String? playbackId;
-  final String? playbackToken;
-  final String? fallbackVideoUrl;
+  final String? uploadThingVideoUrl;
   final VoidCallback? onVideoEnd;
 
-  const MuxVideoPlayer({
+  const UploadThingVideoPlayer({
     super.key,
     this.chapterId,
-    this.playbackId,
-    this.playbackToken,
-    this.fallbackVideoUrl,
+    this.uploadThingVideoUrl,
     this.onVideoEnd,
   });
 
   @override
-  State<MuxVideoPlayer> createState() => _MuxVideoPlayerState();
+  ConsumerState<UploadThingVideoPlayer> createState() =>
+      _UploadThingVideoPlayerState();
 }
 
-class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
+class _UploadThingVideoPlayerState
+    extends ConsumerState<UploadThingVideoPlayer> {
   VideoPlayerController? _videoPlayerController;
   ChewieController? _chewieController;
   bool _isLoading = true;
@@ -36,12 +40,10 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
   }
 
   @override
-  void didUpdateWidget(covariant MuxVideoPlayer oldWidget) {
+  void didUpdateWidget(covariant UploadThingVideoPlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.chapterId != widget.chapterId ||
-        oldWidget.playbackId != widget.playbackId ||
-        oldWidget.playbackToken != widget.playbackToken ||
-        oldWidget.fallbackVideoUrl != widget.fallbackVideoUrl) {
+        oldWidget.uploadThingVideoUrl != widget.uploadThingVideoUrl) {
       _disposePlayer();
       _initializePlayer();
     }
@@ -54,24 +56,23 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
       _errorMessage = null;
     });
 
-    // Uploaded MP4 URLs are directly playable and are the working source for
-    // the earlier chapters. Prefer this path so a Mux playback ID is optional.
-    final uploadedVideoUrl = widget.fallbackVideoUrl?.trim();
-    if (uploadedVideoUrl != null && uploadedVideoUrl.isNotEmpty) {
-      final success = await _tryInitialize(uploadedVideoUrl);
+    // Stream locally cached UploadThing files through the backend byte-range
+    // endpoint. Some UploadThing file URLs return 404 for Android range reads.
+    final chapterId = widget.chapterId?.trim();
+    if (chapterId != null && chapterId.isNotEmpty) {
+      final headers = await _videoAuthHeaders();
+      final cachedVideoUrl = Uri.parse(
+        '${AppEnv.apiBaseUrl}/api/videos/${Uri.encodeComponent(chapterId)}',
+      );
+      final success = await _tryInitialize(cachedVideoUrl, headers: headers);
       if (success) return;
     }
 
-    // Use Mux HLS if the direct upload is missing or cannot be played.
-    final muxPlaybackId = widget.playbackId?.trim();
-    if (muxPlaybackId != null && muxPlaybackId.isNotEmpty) {
-      final token = widget.playbackToken?.trim();
-      final muxUrl = Uri.https(
-        'stream.mux.com',
-        '/$muxPlaybackId.m3u8',
-        token != null && token.isNotEmpty ? {'token': token} : null,
-      ).toString();
-      final success = await _tryInitialize(muxUrl);
+    // Keep UploadThing as the only remote source and fallback for uncached
+    // videos. No Mux playback request is made by the phone app.
+    final uploadedVideoUrl = widget.uploadThingVideoUrl?.trim();
+    if (uploadedVideoUrl != null && uploadedVideoUrl.isNotEmpty) {
+      final success = await _tryInitialize(Uri.parse(uploadedVideoUrl));
       if (success) return;
     }
 
@@ -80,22 +81,48 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
       setState(() {
         _isLoading = false;
         _isError = true;
-        _errorMessage = 'Video stream could not be loaded.';
+        _errorMessage = 'UploadThing video could not be loaded.';
       });
     }
   }
 
-  Future<bool> _tryInitialize(String url) async {
+  Future<Map<String, String>> _videoAuthHeaders() async {
+    final storage = ref.read(secureStorageProvider);
+    final headers = <String, String>{};
+    final token = await storage.read(key: 'auth_session_token');
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    final userData = await storage.read(key: 'auth_user_data');
+    if (userData != null) {
+      try {
+        final userId =
+            (jsonDecode(userData) as Map<String, dynamic>)['id'] as String?;
+        if (userId != null && userId.isNotEmpty) {
+          headers['X-User-Id'] = userId;
+        }
+      } catch (_) {}
+    }
+    return headers;
+  }
+
+  Future<bool> _tryInitialize(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async {
+    VideoPlayerController? controller;
     try {
       _disposePlayer();
 
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(url),
+      final activeController = VideoPlayerController.networkUrl(
+        url,
+        httpHeaders: headers,
       );
+      controller = activeController;
 
-      await controller.initialize();
+      await activeController.initialize();
 
-      controller.addListener(() {
+      activeController.addListener(() {
         if (_videoPlayerController != null &&
             _videoPlayerController!.value.isInitialized &&
             _videoPlayerController!.value.position >=
@@ -106,11 +133,11 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
       });
 
       final chewie = ChewieController(
-        videoPlayerController: controller,
+        videoPlayerController: activeController,
         autoPlay: true,
         looping: false,
-        aspectRatio: controller.value.aspectRatio > 0
-            ? controller.value.aspectRatio
+        aspectRatio: activeController.value.aspectRatio > 0
+            ? activeController.value.aspectRatio
             : 16 / 9,
         materialProgressColors: ChewieProgressColors(
           playedColor: const Color(0xFF0284C7),
@@ -122,7 +149,7 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
 
       if (mounted) {
         setState(() {
-          _videoPlayerController = controller;
+          _videoPlayerController = activeController;
           _chewieController = chewie;
           _isLoading = false;
           _isError = false;
@@ -130,6 +157,7 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
       }
       return true;
     } catch (e) {
+      await controller?.dispose();
       return false;
     }
   }
@@ -167,11 +195,19 @@ class _MuxVideoPlayerState extends State<MuxVideoPlayer> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline_rounded, color: Colors.amberAccent, size: 40),
+              const Icon(
+                Icons.error_outline_rounded,
+                color: Colors.amberAccent,
+                size: 40,
+              ),
               const SizedBox(height: 12),
               const Text(
                 'Video Playback Unavailable',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
               const SizedBox(height: 6),
               Text(

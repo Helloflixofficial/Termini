@@ -15,8 +15,9 @@ class ApiConstants {
       '/api/courses/$courseId/chapters/$chapterId';
   static String chapterProgress(String courseId, String chapterId) =>
       '/api/courses/$courseId/chapters/$chapterId/progress';
-  static String checkout(String courseId) =>
-      '/api/courses/$courseId/checkout';
+  static String checkout(String courseId) => '/api/courses/$courseId/checkout';
+  static String verifyCheckout(String courseId) =>
+      '/api/courses/$courseId/checkout/verify';
 
   // LiveKit Meetings
   static const String liveKitSessions = '/api/livekit/sessions';

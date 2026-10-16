@@ -3,19 +3,22 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/breakpoints.dart';
 import '../../../core/widgets/empty_state.dart';
 import '../../../core/widgets/responsive_layout.dart';
 import '../../../core/widgets/skeleton_loader.dart';
+import '../../auth/presentation/auth_controller.dart';
+import '../../live/presentation/student_meet_screen.dart';
 import '../../live/data/livekit_repository.dart';
 import '../../live/domain/meeting_entity.dart';
 
 final liveSessionsProvider =
     FutureProvider.autoDispose<List<MeetingSessionEntity>>((ref) async {
-  final repo = ref.watch(liveKitRepositoryProvider);
-  return repo.getSessions();
-});
+      final repo = ref.watch(liveKitRepositoryProvider);
+      return repo.getSessions();
+    });
 
 class TeacherMeetScreen extends ConsumerStatefulWidget {
   const TeacherMeetScreen({super.key});
@@ -73,7 +76,10 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 value: startImmediately,
-                title: const Text('Open meeting room immediately', style: TextStyle(fontSize: 13)),
+                title: const Text(
+                  'Open meeting room immediately',
+                  style: TextStyle(fontSize: 13),
+                ),
                 onChanged: (val) {
                   if (val != null) setModalState(() => startImmediately = val);
                 },
@@ -81,16 +87,23 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
             ElevatedButton(
               onPressed: () async {
                 final title = titleCtrl.text.trim();
                 if (title.isNotEmpty) {
                   Navigator.pop(ctx);
-                  final session = await ref.read(liveKitRepositoryProvider).createSession(
-                    title,
-                    description: descCtrl.text.trim().isNotEmpty ? descCtrl.text.trim() : null,
-                  );
+                  final session = await ref
+                      .read(liveKitRepositoryProvider)
+                      .createSession(
+                        title,
+                        description: descCtrl.text.trim().isNotEmpty
+                            ? descCtrl.text.trim()
+                            : null,
+                      );
                   ref.invalidate(liveSessionsProvider);
                   if (!context.mounted) return;
                   if (startImmediately) {
@@ -118,6 +131,10 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!(ref.watch(currentUserProvider)?.isTeacher ?? false)) {
+      return const StudentMeetScreen();
+    }
+
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final sessionsAsync = ref.watch(liveSessionsProvider);
@@ -143,9 +160,17 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
           child: sessionsAsync.when(
             loading: () => Column(
               children: const [
-                SkeletonLoader(width: double.infinity, height: 120, borderRadius: 16),
+                SkeletonLoader(
+                  width: double.infinity,
+                  height: 120,
+                  borderRadius: 16,
+                ),
                 SizedBox(height: 20),
-                SkeletonLoader(width: double.infinity, height: 80, borderRadius: 12),
+                SkeletonLoader(
+                  width: double.infinity,
+                  height: 80,
+                  borderRadius: 12,
+                ),
               ],
             ),
             error: (err, _) => ErrorStateWidget(
@@ -158,8 +183,12 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
 
               final filteredActive = active.where((s) {
                 if (_searchQuery.isEmpty) return true;
-                return s.title.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                    s.roomName.toLowerCase().contains(_searchQuery.toLowerCase());
+                return s.title.toLowerCase().contains(
+                      _searchQuery.toLowerCase(),
+                    ) ||
+                    s.roomName.toLowerCase().contains(
+                      _searchQuery.toLowerCase(),
+                    );
               }).toList();
 
               return Column(
@@ -180,7 +209,8 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF0284C7).withValues(alpha: 0.3),
+                            color: const Color(0xFF0284C7)
+                                .withValues(alpha: 0.3),
                             blurRadius: 16,
                             offset: const Offset(0, 6),
                           ),
@@ -204,12 +234,19 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
                                 SizedBox(height: 6),
                                 Text(
                                   'Start a live class now',
-                                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                                  style: TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
                                 ),
                                 SizedBox(height: 4),
                                 Text(
                                   'Create a room, preview your camera and mic, and invite students in seconds.',
-                                  style: TextStyle(fontSize: 13, color: Colors.white70),
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.white70,
+                                  ),
                                 ),
                               ],
                             ),
@@ -220,7 +257,10 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
                               color: Colors.white.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.arrow_forward_rounded, color: Colors.white),
+                            child: const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.white,
+                            ),
                           ),
                         ],
                       ),
@@ -235,7 +275,10 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
                       padding: const EdgeInsets.all(16.0),
                       child: Row(
                         children: [
-                          const Icon(Icons.meeting_room_outlined, color: AppColors.brandSky),
+                          const Icon(
+                            Icons.meeting_room_outlined,
+                            color: AppColors.brandSky,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: TextField(
@@ -294,21 +337,26 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
                   // Active Sessions List
                   Text(
                     'Active Sessions (${filteredActive.length})',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   if (filteredActive.isEmpty)
                     const EmptyStateWidget(
                       icon: Icons.videocam_off_outlined,
                       title: 'No active sessions',
-                      description: 'Start a new session or check your ended sessions.',
+                      description:
+                          'Start a new session or check your ended sessions.',
                     )
                   else
                     GridView.builder(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: Breakpoints.getGridCrossAxisCount(context),
+                        crossAxisCount: Breakpoints.getGridCrossAxisCount(
+                          context,
+                        ),
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
                         childAspectRatio: 1.3,
@@ -320,7 +368,9 @@ class _TeacherMeetScreenState extends ConsumerState<TeacherMeetScreen> {
                           session: s,
                           onJoin: () => context.go('/meet/${s.roomName}'),
                           onEnd: () async {
-                            await ref.read(liveKitRepositoryProvider).endSession(s.id);
+                            await ref
+                                .read(liveKitRepositoryProvider)
+                                .endSession(s.id);
                             ref.invalidate(liveSessionsProvider);
                           },
                         );
@@ -369,13 +419,18 @@ class _StatCard extends StatelessWidget {
                 children: [
                   Text(
                     count.toString(),
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   Text(
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10.5, color: colorScheme.onSurfaceVariant),
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -411,7 +466,9 @@ class _SessionCard extends StatelessWidget {
         children: [
           Container(
             height: 4,
-            color: session.isActive ? AppColors.brandEmerald : colorScheme.outline,
+            color: session.isActive
+                ? AppColors.brandEmerald
+                : colorScheme.outline,
           ),
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -422,7 +479,10 @@ class _SessionCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: session.isActive
                             ? AppColors.brandEmerald.withValues(alpha: 0.1)
@@ -434,13 +494,18 @@ class _SessionCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: session.isActive ? AppColors.brandEmerald : colorScheme.onSurfaceVariant,
+                          color: session.isActive
+                              ? AppColors.brandEmerald
+                              : colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ),
                     Text(
                       DateFormat.yMMMd().format(session.createdAt),
-                      style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -449,15 +514,21 @@ class _SessionCard extends StatelessWidget {
                   session.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                if (session.description != null && session.description!.isNotEmpty) ...[
+                if (session.description != null &&
+                    session.description!.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     session.description!,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
                 const Spacer(),
@@ -475,15 +546,23 @@ class _SessionCard extends StatelessWidget {
                       icon: const Icon(Icons.copy_rounded, size: 16),
                       tooltip: 'Copy room code',
                       onPressed: () {
-                        Clipboard.setData(ClipboardData(text: session.roomName));
+                        Clipboard.setData(
+                          ClipboardData(text: session.roomName),
+                        );
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Room code copied to clipboard!')),
+                          const SnackBar(
+                            content: Text('Room code copied to clipboard!'),
+                          ),
                         );
                       },
                     ),
                     const SizedBox(width: 4),
                     IconButton.outlined(
-                      icon: const Icon(Icons.delete_outline_rounded, size: 16, color: AppColors.lightDestructive),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        size: 16,
+                        color: AppColors.lightDestructive,
+                      ),
                       tooltip: 'End session',
                       onPressed: onEnd,
                     ),

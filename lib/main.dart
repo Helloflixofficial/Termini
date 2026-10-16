@@ -1,8 +1,11 @@
 import 'dart:async';
+
 import 'package:app_links/app_links.dart';
 import 'package:clerk_auth/clerk_auth.dart' as clerk;
 import 'package:clerk_flutter/clerk_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,14 +14,24 @@ import 'core/config/env.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
+import 'features/courses/data/course_repository.dart';
+import 'features/courses/presentation/course_detail_screen.dart'
+    show courseDetailProvider;
+import 'features/dashboard/presentation/dashboard_controller.dart'
+    show dashboardControllerProvider;
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(
-    const ProviderScope(
-      child: TerminiApp(),
-    ),
-  );
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      await Firebase.initializeApp();
+    } catch (error) {
+      // Keep the app usable when the optional, local Firebase Android config
+      // has not been installed yet. Push messaging will be enabled once added.
+      debugPrint('[Termini Push] Firebase is not configured: $error');
+    }
+  }
+  runApp(const ProviderScope(child: TerminiApp()));
 }
 
 class TerminiApp extends ConsumerStatefulWidget {
@@ -38,23 +51,62 @@ class _TerminiAppState extends ConsumerState<TerminiApp> {
     _deepLinkController = StreamController<Uri?>.broadcast();
 
     // Check cold-start initial deep link
-    _appLinks.getInitialLink().then((uri) {
-      if (uri != null) {
-        debugPrint('[Termini DeepLink] Initial link: $uri');
-        _deepLinkController.add(uri);
-      }
-    }).catchError((err) {
-      debugPrint('[Termini DeepLink] Initial link error: $err');
-    });
+    _appLinks
+        .getInitialLink()
+        .then((uri) {
+          if (uri != null) {
+            debugPrint('[Termini DeepLink] Initial link: $uri');
+            _handleIncomingLink(uri);
+          }
+        })
+        .catchError((err) {
+          debugPrint('[Termini DeepLink] Initial link error: $err');
+        });
 
     // Listen to incoming runtime deep links
-    _appLinks.uriLinkStream.listen(
-      (uri) {
-        debugPrint('[Termini DeepLink] Incoming link: $uri');
-        _deepLinkController.add(uri);
-      },
-      onError: (err) => debugPrint('[Termini DeepLink] Stream error: $err'),
-    );
+    _appLinks.uriLinkStream.listen((uri) {
+      debugPrint('[Termini DeepLink] Incoming link: $uri');
+      _handleIncomingLink(uri);
+    }, onError: (err) => debugPrint('[Termini DeepLink] Stream error: $err'));
+  }
+
+  void _handleIncomingLink(Uri uri) {
+    if (uri.scheme == 'termini' &&
+        uri.host == 'course' &&
+        uri.pathSegments.length == 1) {
+      unawaited(_handleCheckoutReturn(uri));
+      return;
+    }
+    _deepLinkController.add(uri);
+  }
+
+  Future<void> _handleCheckoutReturn(Uri uri) async {
+    final courseId = uri.pathSegments.single;
+    final router = ref.read(appRouterProvider);
+    if (uri.queryParameters['canceled'] == '1') {
+      router.go('/course/${Uri.encodeComponent(courseId)}');
+      return;
+    }
+
+    final sessionId = uri.queryParameters['session_id'];
+    if (uri.queryParameters['success'] != '1' || sessionId == null) {
+      router.go('/course/${Uri.encodeComponent(courseId)}');
+      return;
+    }
+
+    var enrolled = false;
+    try {
+      enrolled = await ref
+          .read(courseRepositoryProvider)
+          .verifyCheckoutSession(courseId, sessionId);
+    } catch (error) {
+      debugPrint('[Termini Checkout] Payment confirmation pending: $error');
+    }
+
+    ref.invalidate(courseDetailProvider(courseId));
+    ref.invalidate(dashboardControllerProvider);
+    if (!mounted) return;
+    router.go(enrolled ? '/' : '/course/${Uri.encodeComponent(courseId)}');
   }
 
   @override
@@ -66,10 +118,7 @@ class _TerminiAppState extends ConsumerState<TerminiApp> {
   /// Tells Clerk to redirect back to our app scheme after Chrome OAuth
   Uri? _generateDeepLink(BuildContext context, clerk.Strategy strategy) {
     if (strategy.isOauth) {
-      return Uri(
-        scheme: 'termini',
-        host: 'oauth-callback',
-      );
+      return Uri(scheme: 'termini', host: 'oauth-callback');
     }
     return null;
   }
@@ -93,15 +142,16 @@ class _TerminiAppState extends ConsumerState<TerminiApp> {
       config: ClerkAuthConfig(
         publishableKey: AppEnv.clerkPublishableKey,
         redirectionGenerator: _generateDeepLink,
-        deepLinkStream: _deepLinkController.stream.asyncMap(_handleClerkDeepLink),
+        deepLinkStream: _deepLinkController.stream.asyncMap(
+          _handleClerkDeepLink,
+        ),
         defaultLaunchMode: LaunchMode.externalApplication,
       ),
       child: MaterialApp.router(
         title: 'Termini LMS',
         debugShowCheckedModeBanner: false,
-        builder: (context, child) => _StartupSplash(
-          child: child ?? const SizedBox.shrink(),
-        ),
+        builder: (context, child) =>
+            _StartupSplash(child: child ?? const SizedBox.shrink()),
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: themeMode,

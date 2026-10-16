@@ -145,19 +145,39 @@ class DashboardScreen extends ConsumerWidget {
               ),
             ),
           );
-          items.add(
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              sliver: SliverGrid(
-                gridDelegate: gridDelegate,
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) =>
-                      CourseCard(course: courses[index], youtubeStyle: true),
-                  childCount: courses.length,
+          if (Breakpoints.isCompact(context)) {
+            items.add(
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: CourseCard(
+                        course: courses[index],
+                        youtubeStyle: true,
+                      ),
+                    ),
+                    childCount: courses.length,
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          } else {
+            items.add(
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                sliver: SliverGrid(
+                  gridDelegate: gridDelegate,
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) =>
+                        CourseCard(course: courses[index], youtubeStyle: true),
+                    childCount: courses.length,
+                  ),
+                ),
+              ),
+            );
+          }
           items.add(const SliverToBoxAdapter(child: SizedBox(height: 32)));
         }
 

@@ -118,6 +118,14 @@ Running commands with npm `npm run [command]`
 | :------ | :--------------------------------------- |
 | `dev`   | Starts a development instance of the app |
 
+### Flutter course payments
+
+The Flutter API server creates Stripe-hosted Checkout Sessions from the course's database price. It records enrollment only after a verified Stripe payment event or an authenticated app-return verification confirms that the session is paid.
+
+Configure `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, and (optionally) `STRIPE_CURRENCY` in the server's private `.env` file. In Stripe, add a webhook endpoint at `https://<your-api-host>/api/webhook` and subscribe to `checkout.session.completed` and `checkout.session.async_payment_succeeded`. Keep the signing secret private and use Stripe test keys/cards while validating the flow.
+
+For local phone development, Stripe's webhook cannot reach a private LAN server directly. The app therefore verifies the completed Checkout Session with the authenticated API on return; the deployed server should still have the webhook configured as the reliable payment-delivery path.
+
 
 Examples
 
