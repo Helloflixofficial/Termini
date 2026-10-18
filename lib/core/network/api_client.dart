@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:clerk_flutter/clerk_flutter.dart';
 
 import 'dart:convert';
 
@@ -9,6 +10,12 @@ import '../config/env.dart';
 import '../error/failures.dart';
 
 const String _authTokenKey = 'auth_session_token';
+
+ClerkAuthState? _clerkAuthState;
+
+void bindClerkAuthState(ClerkAuthState authState) {
+  _clerkAuthState = authState;
+}
 
 final secureStorageProvider = Provider<FlutterSecureStorage>((ref) {
   return const FlutterSecureStorage();
@@ -24,7 +31,25 @@ class AuthInterceptor extends Interceptor {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    final token = await _storage.read(key: _authTokenKey);
+    final savedToken = await _storage.read(key: _authTokenKey);
+    String? token;
+    final clerkAuthState = _clerkAuthState;
+    if (clerkAuthState?.isSignedIn == true) {
+      try {
+        // Clerk session JWTs expire. Ask Clerk for the current token on each
+        // request instead of relying on the token captured at sign-in time.
+        token = (await clerkAuthState!.sessionToken()).jwt;
+      } catch (_) {
+        // Keep an unexpired saved JWT as a fallback during transient refresh
+        // failures; never send a Clerk session ID as a bearer token.
+        token = savedToken;
+      }
+    } else if (savedToken != null &&
+        !savedToken.startsWith('clerk_session_')) {
+      // Preserve legacy backend-managed sessions without reusing a signed-out
+      // Clerk session.
+      token = savedToken;
+    }
     if (token != null && token.isNotEmpty) {
       // ClerkUserBridge prefixes persisted Clerk sessions so the local auth
       // repository can distinguish them from backend-managed sessions. The

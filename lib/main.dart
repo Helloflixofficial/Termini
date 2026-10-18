@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'core/config/env.dart';
+import 'core/network/api_client.dart' show bindClerkAuthState;
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
@@ -150,8 +151,10 @@ class _TerminiAppState extends ConsumerState<TerminiApp> {
       child: MaterialApp.router(
         title: 'Termini LMS',
         debugShowCheckedModeBanner: false,
-        builder: (context, child) =>
-            _StartupSplash(child: child ?? const SizedBox.shrink()),
+        builder: (context, child) {
+          bindClerkAuthState(ClerkAuth.of(context, listen: false));
+          return _StartupSplash(child: child ?? const SizedBox.shrink());
+        },
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
         themeMode: themeMode,
