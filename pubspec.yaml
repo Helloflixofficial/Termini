@@ -23,7 +23,7 @@ dependencies:
   http: ^1.3.0
 
   # Storage & Preferences
-  flutter_secure_storage: ^9.2.4
+  flutter_secure_storage: ^11.2.0
   shared_preferences: ^2.5.2
 
   # Clerk Authentication
