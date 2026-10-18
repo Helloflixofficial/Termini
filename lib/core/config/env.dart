@@ -7,6 +7,9 @@ class AppEnv {
 
   static String get apiBaseUrl {
     if (_envApiBaseUrl.isNotEmpty) return _envApiBaseUrl;
+    // Release builds must reach the deployed API. Keep local development
+    // pointed at the local server unless API_BASE_URL is explicitly supplied.
+    if (kReleaseMode) return 'https://appserver-woad.vercel.app';
     return defaultTargetPlatform == TargetPlatform.android
         ? 'http://10.0.2.2:3000'
         : 'http://localhost:3000';

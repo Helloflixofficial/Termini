@@ -26,7 +26,16 @@ class AuthInterceptor extends Interceptor {
   ) async {
     final token = await _storage.read(key: _authTokenKey);
     if (token != null && token.isNotEmpty) {
-      options.headers['Authorization'] = 'Bearer $token';
+      // ClerkUserBridge prefixes persisted Clerk sessions so the local auth
+      // repository can distinguish them from backend-managed sessions. The
+      // marker is not part of a Clerk JWT and must not be sent to Clerk.
+      final bearerToken = token.startsWith('clerk_session_')
+          ? token.substring('clerk_session_'.length)
+          : token;
+      if (!token.startsWith('clerk_session_') ||
+          bearerToken.split('.').length == 3) {
+        options.headers['Authorization'] = 'Bearer $bearerToken';
+      }
     }
     final userData = await _storage.read(key: 'auth_user_data');
     if (userData != null) {
