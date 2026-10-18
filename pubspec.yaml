@@ -43,7 +43,7 @@ dependencies:
   flutter_webrtc: ^1.6.2+hotfix.3
 
   # UI Components, Formats, Utilities
-  cached_network_image: ^3.4.1
+  cached_network_image: ^4.0.4
   image_picker: ^1.2.3
   shimmer: ^3.0.0
   intl: ^0.20.2
