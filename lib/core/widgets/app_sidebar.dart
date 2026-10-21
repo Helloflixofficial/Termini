@@ -22,6 +22,7 @@ class AppSidebar extends ConsumerWidget {
   static const _studentItems = <_SidebarDestination>[
     _SidebarDestination('Dashboard', '/', Icons.grid_view_rounded),
     _SidebarDestination('Search courses', '/search', Icons.explore_rounded),
+    _SidebarDestination('Listing', '/listing', Icons.currency_bitcoin_rounded),
     _SidebarDestination('Community', '/community', Icons.forum_outlined),
     _SidebarDestination('ShortMeet', '/shortmeet', Icons.video_camera_front_outlined),
   ];

@@ -25,11 +25,12 @@ class ResponsiveLayout extends ConsumerWidget {
   });
 
   int _getBottomNavIndex(String route) {
-    if (route.startsWith('/profile')) return 4;
+    if (route.startsWith('/profile')) return 5;
     if (route == '/') return 0;
     if (route == '/search') return 1;
-    if (route == '/community') return 2;
-    if (route == '/shortmeet' || route.startsWith('/meet')) return 3;
+    if (route.startsWith('/listing')) return 2;
+    if (route == '/community') return 3;
+    if (route == '/shortmeet' || route.startsWith('/meet')) return 4;
     return 0;
   }
 
@@ -78,12 +79,15 @@ class ResponsiveLayout extends ConsumerWidget {
                 context.go('/search');
                 break;
               case 2:
-                context.go('/community');
+                context.go('/listing');
                 break;
               case 3:
-                context.go('/shortmeet');
+                context.go('/community');
                 break;
               case 4:
+                context.go('/shortmeet');
+                break;
+              case 5:
                 context.go('/profile');
                 break;
             }
@@ -98,6 +102,11 @@ class ResponsiveLayout extends ConsumerWidget {
               icon: Icon(Icons.explore_outlined),
               activeIcon: Icon(Icons.explore_rounded),
               label: 'Search',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.currency_bitcoin_outlined),
+              activeIcon: Icon(Icons.currency_bitcoin_rounded),
+              label: 'Listing',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.forum_outlined),

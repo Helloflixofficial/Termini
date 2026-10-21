@@ -14,6 +14,7 @@ import '../../features/courses/presentation/search_screen.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/live/presentation/live_meet_screen.dart';
 import '../../features/live/presentation/student_meet_screen.dart';
+import '../../features/listing/presentation/listing_screen.dart';
 import '../../features/player/presentation/chapter_player_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/profile/presentation/account_settings_screen.dart';
@@ -101,6 +102,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/search',
         name: 'search',
         builder: (context, state) => const SearchScreen(),
+      ),
+      GoRoute(
+        path: '/listing',
+        name: 'listing',
+        builder: (context, state) => const ListingScreen(),
+        routes: [
+          GoRoute(
+            path: ':coinId',
+            name: 'listing-coin',
+            builder: (context, state) => ListingCoinScreen(
+              coinId: state.pathParameters['coinId'] ?? '',
+              initialCoin: state.extra is Map<String, dynamic>
+                  ? state.extra as Map<String, dynamic>
+                  : null,
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: '/course/:courseId',
