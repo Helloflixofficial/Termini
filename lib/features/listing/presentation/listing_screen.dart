@@ -53,8 +53,19 @@ final listingCoinProvider = FutureProvider.autoDispose
       return rows.isEmpty ? null : Map<String, dynamic>.from(rows.first as Map);
     });
 
+final listingCategoriesProvider =
+    FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
+      final dio = ref.watch(apiClientProvider);
+      final response = await dio.get('/api/crypto/categories');
+      return (response.data as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(growable: false);
+    });
+
 class ListingScreen extends ConsumerStatefulWidget {
-  const ListingScreen({super.key});
+  final String section;
+  const ListingScreen({super.key, this.section = 'overview'});
 
   @override
   ConsumerState<ListingScreen> createState() => _ListingScreenState();
@@ -75,6 +86,12 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
   @override
   void initState() {
     super.initState();
+    _filter = switch (widget.section) {
+      'gainers' => 'Gainers',
+      'losers' => 'Losers',
+      'watchlist' => 'Watchlist',
+      _ => 'All',
+    };
     _scrollController = ScrollController()..addListener(_maybeLoadMore);
     _loadFavorites();
   }
@@ -181,9 +198,20 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
   Widget build(BuildContext context) {
     final market = ref.watch(listingMarketProvider);
     final scheme = Theme.of(context).colorScheme;
+    final pageTitle = switch (widget.section) {
+      'markets' => 'All markets',
+      'trending' => 'Trending coins',
+      'gainers' => 'Top gainers',
+      'losers' => 'Top losers',
+      'watchlist' => 'Your watchlist',
+      _ => 'Crypto market',
+    };
+    final route = widget.section == 'overview'
+        ? '/listing'
+        : '/listing/${widget.section}';
     return ResponsiveLayout(
-      title: 'Listing',
-      currentRoute: '/listing',
+      title: pageTitle,
+      currentRoute: route,
       body: market.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => _MarketError(
@@ -191,17 +219,43 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
           onRetry: () => ref.invalidate(listingMarketProvider),
         ),
         data: (data) {
-          final global = data['global'] is Map
-              ? Map<String, dynamic>.from(data['global'] as Map)
-              : <String, dynamic>{};
           final trending = (data['trending'] as List? ?? const [])
               .whereType<Map>()
               .map((item) => Map<String, dynamic>.from(item))
               .toList();
+          if (widget.section == 'trending') {
+            return RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(listingMarketProvider);
+                await ref.read(listingMarketProvider.future);
+              },
+              child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
+                itemCount: trending.length + 1,
+                itemBuilder: (context, index) => index == 0
+                    ? const _PageHeading(
+                        title: 'Trending coins',
+                        subtitle: 'Coins people are searching for right now',
+                      )
+                    : _TrendingCoinRow(
+                        coin: trending[index - 1],
+                        onTap: () => _openCoin(trending[index - 1]),
+                      ),
+              ),
+            );
+          }
+          final global = data['global'] is Map
+              ? Map<String, dynamic>.from(data['global'] as Map)
+              : <String, dynamic>{};
           final coins = _visibleCoins([
             ...(data['markets'] as List? ?? const []),
             ..._additionalCoins,
           ]);
+          final showTrending = widget.section == 'overview';
+          final fixedCount = showTrending ? 5 : 4;
+          final controlsIndex = showTrending ? 3 : 2;
+          final tableIndex = controlsIndex + 1;
           return RefreshIndicator(
             onRefresh: () async {
               setState(() {
@@ -221,17 +275,23 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
               itemCount:
                   coins.length +
-                  5 +
+                  fixedCount +
                   (_hasMore || _loadingMore || _loadMoreError != null ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  return _PageHeading(updatedAt: data['updatedAt']?.toString());
+                  return _PageHeading(
+                    title: pageTitle,
+                    subtitle: widget.section == 'overview'
+                        ? 'Prices and market data at a glance'
+                        : null,
+                    updatedAt: data['updatedAt']?.toString(),
+                  );
                 }
                 if (index == 1) return _GlobalStats(global: global);
-                if (index == 2) {
+                if (showTrending && index == 2) {
                   return _TrendingStrip(items: trending, onTap: _openCoin);
                 }
-                if (index == 3) {
+                if (index == controlsIndex) {
                   return _MarketControls(
                     controller: _searchController,
                     filter: _filter,
@@ -239,17 +299,17 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
                     onFilter: (value) => setState(() => _filter = value),
                   );
                 }
-                if (index == 4) {
+                if (index == tableIndex) {
                   return _MarketTableHeader(color: scheme.onSurfaceVariant);
                 }
-                if (index >= coins.length + 5) {
+                if (index >= coins.length + fixedCount) {
                   return _LoadMoreFooter(
                     loading: _loadingMore,
                     error: _loadMoreError,
                     onTap: _loadNextPage,
                   );
                 }
-                final coin = coins[index - 5];
+                final coin = coins[index - fixedCount];
                 return _CoinMarketRow(
                   coin: coin,
                   favorite: _favorites.contains(coin['id']),
@@ -278,6 +338,44 @@ class ListingCoinScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ListingCoinScreen> createState() => _ListingCoinScreenState();
+}
+
+class ListingCategoriesScreen extends ConsumerWidget {
+  const ListingCategoriesScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final categories = ref.watch(listingCategoriesProvider);
+    return ResponsiveLayout(
+      title: 'Crypto categories',
+      currentRoute: '/listing/categories',
+      body: categories.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => _MarketError(
+          message: _friendlyError(error),
+          onRetry: () => ref.invalidate(listingCategoriesProvider),
+        ),
+        data: (items) => RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(listingCategoriesProvider);
+            await ref.read(listingCategoriesProvider.future);
+          },
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
+            itemCount: items.length + 1,
+            itemBuilder: (context, index) => index == 0
+                ? const _PageHeading(
+                    title: 'Crypto categories',
+                    subtitle:
+                        'Market cap, volume, and daily movement by sector',
+                  )
+                : _CategoryRow(category: items[index - 1]),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ListingCoinScreenState extends ConsumerState<ListingCoinScreen> {
@@ -353,8 +451,14 @@ Map<String, dynamic>? _findCoin(Map<String, dynamic>? data, String id) {
 }
 
 class _PageHeading extends StatelessWidget {
+  final String title;
+  final String? subtitle;
   final String? updatedAt;
-  const _PageHeading({this.updatedAt});
+  const _PageHeading({
+    this.title = 'Crypto market',
+    this.subtitle,
+    this.updatedAt,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -369,15 +473,15 @@ class _PageHeading extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Crypto market',
+                  title,
                   style: Theme.of(context).textTheme.headlineSmall
                       ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   updated == null
-                      ? 'Prices and market data at a glance'
-                      : 'Prices and market data · updated ${updated.hour.toString().padLeft(2, '0')}:${updated.minute.toString().padLeft(2, '0')}',
+                      ? subtitle ?? 'Prices and market data at a glance'
+                      : '${subtitle ?? 'Prices and market data'} · updated ${updated.hour.toString().padLeft(2, '0')}:${updated.minute.toString().padLeft(2, '0')}',
                   style: TextStyle(color: scheme.onSurfaceVariant),
                 ),
               ],
@@ -552,6 +656,150 @@ class _TrendingStrip extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TrendingCoinRow extends StatelessWidget {
+  final Map<String, dynamic> coin;
+  final VoidCallback onTap;
+  const _TrendingCoinRow({required this.coin, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final image = coin['thumb']?.toString();
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      margin: const EdgeInsets.only(bottom: 9),
+      child: ListTile(
+        onTap: onTap,
+        leading: image == null || image.isEmpty
+            ? const CircleAvatar(child: Icon(Icons.currency_bitcoin_rounded))
+            : CachedNetworkImage(
+                imageUrl: image,
+                width: 40,
+                height: 40,
+                memCacheWidth: 100,
+                imageBuilder: (context, provider) =>
+                    CircleAvatar(backgroundImage: provider),
+                placeholder: (context, url) => const CircleAvatar(
+                  child: Icon(Icons.currency_bitcoin_rounded, size: 18),
+                ),
+                errorWidget: (context, url, error) => const CircleAvatar(
+                  child: Icon(Icons.currency_bitcoin_rounded, size: 18),
+                ),
+              ),
+        title: Text(
+          coin['name']?.toString() ?? 'Unknown coin',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        subtitle: Text(
+          '${coin['symbol'] ?? ''}'.toUpperCase(),
+          style: TextStyle(color: scheme.onSurfaceVariant),
+        ),
+        trailing: Text(
+          (coin['market_cap_rank'] == null)
+              ? 'Trending'
+              : 'Rank #${coin['market_cap_rank']}',
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryRow extends StatelessWidget {
+  final Map<String, dynamic> category;
+  const _CategoryRow({required this.category});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final change = _asDouble(category['market_cap_change_24h']);
+    final positive = (change ?? 0) >= 0;
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    category['name']?.toString() ?? 'Unnamed category',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                Text(
+                  change == null
+                      ? '—'
+                      : '${positive ? '+' : ''}${change.toStringAsFixed(2)}%',
+                  style: TextStyle(
+                    color: positive
+                        ? const Color(0xFF159A68)
+                        : const Color(0xFFE0505A),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 18,
+              runSpacing: 6,
+              children: [
+                _CategoryMetric(
+                  label: 'Market cap',
+                  value: _compactMoney(_asDouble(category['market_cap'])),
+                ),
+                _CategoryMetric(
+                  label: '24h volume',
+                  value: _compactMoney(_asDouble(category['volume_24h'])),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  const _CategoryMetric({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+      ],
     );
   }
 }

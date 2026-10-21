@@ -31,6 +31,35 @@ class AppSidebar extends ConsumerWidget {
     ),
   ];
 
+  static const _listingItems = <_SidebarDestination>[
+    _SidebarDestination('Markets', '/listing/markets', Icons.candlestick_chart),
+    _SidebarDestination(
+      'Trending',
+      '/listing/trending',
+      Icons.local_fire_department_outlined,
+    ),
+    _SidebarDestination(
+      'Top gainers',
+      '/listing/gainers',
+      Icons.trending_up_rounded,
+    ),
+    _SidebarDestination(
+      'Top losers',
+      '/listing/losers',
+      Icons.trending_down_rounded,
+    ),
+    _SidebarDestination(
+      'Categories',
+      '/listing/categories',
+      Icons.category_outlined,
+    ),
+    _SidebarDestination(
+      'Watchlist',
+      '/listing/watchlist',
+      Icons.star_outline_rounded,
+    ),
+  ];
+
   bool _isActive(String route) =>
       currentRoute == route || (route != '/' && currentRoute.startsWith(route));
 
@@ -180,15 +209,34 @@ class AppSidebar extends ConsumerWidget {
                       child: ListView(
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         children: [
-                          for (final item in destinations)
+                          for (final item in destinations) ...[
                             _SidebarNavItem(
                               item: item,
-                              selected: _isActive(item.route),
+                              selected:
+                                  _isActive(item.route) &&
+                                  (item.route != '/listing' ||
+                                      currentRoute == '/listing'),
                               selectedColor: selected,
                               foregroundColor: selectedForeground,
                               idleColor: scheme.onSurfaceVariant,
                               onTap: () => _go(context, item.route),
                             ),
+                            if (item.route == '/listing' &&
+                                _isActive('/listing'))
+                              for (final subitem in _listingItems)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 16),
+                                  child: _SidebarNavItem(
+                                    item: subitem,
+                                    selected: currentRoute == subitem.route,
+                                    selectedColor: selected,
+                                    foregroundColor: selectedForeground,
+                                    idleColor: scheme.onSurfaceVariant,
+                                    onTap: () => _go(context, subitem.route),
+                                    showIcon: false,
+                                  ),
+                                ),
+                          ],
                           const SizedBox(height: 12),
                           Divider(
                             color: scheme.outlineVariant.withValues(alpha: 0.8),
@@ -328,6 +376,7 @@ class _SidebarNavItem extends StatelessWidget {
   final Color foregroundColor;
   final Color idleColor;
   final VoidCallback onTap;
+  final bool showIcon;
 
   const _SidebarNavItem({
     required this.item,
@@ -336,6 +385,7 @@ class _SidebarNavItem extends StatelessWidget {
     required this.foregroundColor,
     required this.idleColor,
     required this.onTap,
+    this.showIcon = true,
   });
 
   @override
@@ -355,11 +405,12 @@ class _SidebarNavItem extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  Icon(
-                    item.icon,
-                    size: 19,
-                    color: selected ? foregroundColor : idleColor,
-                  ),
+                  if (showIcon)
+                    Icon(
+                      item.icon,
+                      size: 19,
+                      color: selected ? foregroundColor : idleColor,
+                    ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(

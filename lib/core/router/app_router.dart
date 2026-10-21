@@ -109,6 +109,40 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ListingScreen(),
         routes: [
           GoRoute(
+            path: 'markets',
+            name: 'listing-markets',
+            builder: (context, state) =>
+                const ListingScreen(section: 'markets'),
+          ),
+          GoRoute(
+            path: 'trending',
+            name: 'listing-trending',
+            builder: (context, state) =>
+                const ListingScreen(section: 'trending'),
+          ),
+          GoRoute(
+            path: 'gainers',
+            name: 'listing-gainers',
+            builder: (context, state) =>
+                const ListingScreen(section: 'gainers'),
+          ),
+          GoRoute(
+            path: 'losers',
+            name: 'listing-losers',
+            builder: (context, state) => const ListingScreen(section: 'losers'),
+          ),
+          GoRoute(
+            path: 'watchlist',
+            name: 'listing-watchlist',
+            builder: (context, state) =>
+                const ListingScreen(section: 'watchlist'),
+          ),
+          GoRoute(
+            path: 'categories',
+            name: 'listing-categories',
+            builder: (context, state) => const ListingCategoriesScreen(),
+          ),
+          GoRoute(
             path: ':coinId',
             name: 'listing-coin',
             builder: (context, state) => ListingCoinScreen(

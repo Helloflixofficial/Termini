@@ -25,12 +25,11 @@ class ResponsiveLayout extends ConsumerWidget {
   });
 
   int _getBottomNavIndex(String route) {
-    if (route.startsWith('/profile')) return 5;
+    if (route.startsWith('/profile')) return 4;
     if (route == '/') return 0;
     if (route == '/search') return 1;
     if (route.startsWith('/listing')) return 2;
     if (route == '/community') return 3;
-    if (route == '/shortmeet' || route.startsWith('/meet')) return 4;
     return 0;
   }
 
@@ -85,9 +84,6 @@ class ResponsiveLayout extends ConsumerWidget {
                 context.go('/community');
                 break;
               case 4:
-                context.go('/shortmeet');
-                break;
-              case 5:
                 context.go('/profile');
                 break;
             }
@@ -112,11 +108,6 @@ class ResponsiveLayout extends ConsumerWidget {
               icon: Icon(Icons.forum_outlined),
               activeIcon: Icon(Icons.forum_rounded),
               label: 'Community',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.videocam_outlined),
-              activeIcon: Icon(Icons.videocam_rounded),
-              label: 'ShortMeet',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.settings_outlined),
