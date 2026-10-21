@@ -24,11 +24,15 @@ class AppSidebar extends ConsumerWidget {
     _SidebarDestination('Search courses', '/search', Icons.explore_rounded),
     _SidebarDestination('Listing', '/listing', Icons.currency_bitcoin_rounded),
     _SidebarDestination('Community', '/community', Icons.forum_outlined),
-    _SidebarDestination('ShortMeet', '/shortmeet', Icons.video_camera_front_outlined),
+    _SidebarDestination(
+      'ShortMeet',
+      '/shortmeet',
+      Icons.video_camera_front_outlined,
+    ),
   ];
 
-  bool _isActive(String route) => currentRoute == route ||
-      (route != '/' && currentRoute.startsWith(route));
+  bool _isActive(String route) =>
+      currentRoute == route || (route != '/' && currentRoute.startsWith(route));
 
   void _go(BuildContext context, String route) {
     onNavigate?.call();
@@ -47,9 +51,21 @@ class AppSidebar extends ConsumerWidget {
     final destinations = <_SidebarDestination>[
       ..._studentItems,
       if (canTeach) ...const [
-        _SidebarDestination('My courses', '/teacher/courses', Icons.menu_book_outlined),
-        _SidebarDestination('Analytics', '/teacher/analytics', Icons.analytics_outlined),
-        _SidebarDestination('Host a meeting', '/teacher/meet', Icons.video_call_outlined),
+        _SidebarDestination(
+          'My courses',
+          '/teacher/courses',
+          Icons.menu_book_outlined,
+        ),
+        _SidebarDestination(
+          'Analytics',
+          '/teacher/analytics',
+          Icons.analytics_outlined,
+        ),
+        _SidebarDestination(
+          'Host a meeting',
+          '/teacher/meet',
+          Icons.video_call_outlined,
+        ),
       ],
     ];
 
@@ -110,7 +126,9 @@ class AppSidebar extends ConsumerWidget {
                   ),
                   const SizedBox(height: 7),
                   Tooltip(
-                    message: isDark ? 'Switch to light theme' : 'Switch to dark theme',
+                    message: isDark
+                        ? 'Switch to light theme'
+                        : 'Switch to dark theme',
                     child: SizedBox(
                       width: 44,
                       height: 44,
@@ -118,13 +136,20 @@ class AppSidebar extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  _SidebarAvatar(user: user, onTap: () => _go(context, '/profile')),
+                  _SidebarAvatar(
+                    user: user,
+                    onTap: () => _go(context, '/profile'),
+                  ),
                   const SizedBox(height: 16),
                 ],
               ),
             ),
             if (!isCollapsed) ...[
-              VerticalDivider(width: 1, thickness: 1, color: scheme.outlineVariant.withValues(alpha: 0.75)),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: scheme.outlineVariant.withValues(alpha: 0.75),
+              ),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -138,10 +163,16 @@ class AppSidebar extends ConsumerWidget {
                               'Termini',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
                             ),
                           ),
-                          Icon(Icons.expand_more_rounded, size: 19, color: scheme.onSurfaceVariant),
+                          Icon(
+                            Icons.expand_more_rounded,
+                            size: 19,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ],
                       ),
                     ),
@@ -159,9 +190,15 @@ class AppSidebar extends ConsumerWidget {
                               onTap: () => _go(context, item.route),
                             ),
                           const SizedBox(height: 12),
-                          Divider(color: scheme.outlineVariant.withValues(alpha: 0.8)),
+                          Divider(
+                            color: scheme.outlineVariant.withValues(alpha: 0.8),
+                          ),
                           _SidebarNavItem(
-                            item: const _SidebarDestination('Notifications', '/notifications', Icons.notifications_none_rounded),
+                            item: const _SidebarDestination(
+                              'Notifications',
+                              '/notifications',
+                              Icons.notifications_none_rounded,
+                            ),
                             selected: _isActive('/notifications'),
                             selectedColor: selected,
                             foregroundColor: selectedForeground,
@@ -169,7 +206,11 @@ class AppSidebar extends ConsumerWidget {
                             onTap: () => _go(context, '/notifications'),
                           ),
                           _SidebarNavItem(
-                            item: const _SidebarDestination('Settings', '/profile', Icons.settings_outlined),
+                            item: const _SidebarDestination(
+                              'Settings',
+                              '/profile',
+                              Icons.settings_outlined,
+                            ),
                             selected: _isActive('/profile'),
                             selectedColor: selected,
                             foregroundColor: selectedForeground,
@@ -190,7 +231,9 @@ class AppSidebar extends ConsumerWidget {
                       user: user,
                       onTap: () => _go(context, '/profile'),
                       onSignOut: () async {
-                        await ref.read(authControllerProvider.notifier).signOut();
+                        await ref
+                            .read(authControllerProvider.notifier)
+                            .signOut();
                         if (context.mounted) context.go('/sign-in');
                       },
                     ),
@@ -224,7 +267,10 @@ class _BrandMark extends StatelessWidget {
     return Container(
       width: 38,
       height: 38,
-      decoration: BoxDecoration(color: fill, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Icon(Icons.school_rounded, size: 21, color: ink),
     );
   }
@@ -263,7 +309,11 @@ class _RailButton extends StatelessWidget {
           child: SizedBox(
             width: 44,
             height: 44,
-            child: Icon(icon, size: 21, color: selected ? foregroundColor : idleColor),
+            child: Icon(
+              icon,
+              size: 21,
+              color: selected ? foregroundColor : idleColor,
+            ),
           ),
         ),
       ),
@@ -305,7 +355,11 @@ class _SidebarNavItem extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  Icon(item.icon, size: 19, color: selected ? foregroundColor : idleColor),
+                  Icon(
+                    item.icon,
+                    size: 19,
+                    color: selected ? foregroundColor : idleColor,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -314,7 +368,9 @@ class _SidebarNavItem extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: textStyle?.copyWith(
                         color: selected ? foregroundColor : idleColor,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                     ),
                   ),
@@ -351,7 +407,10 @@ class _SidebarAvatar extends StatelessWidget {
               : null,
           child: user?.imageUrl?.isNotEmpty == true
               ? null
-              : Text(initial, style: const TextStyle(fontWeight: FontWeight.w700)),
+              : Text(
+                  initial,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
         ),
       ),
     );
@@ -377,9 +436,15 @@ class _ExploreCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Keep learning', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+              const Text(
+                'Keep learning',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              ),
               const SizedBox(height: 3),
-              Text('Find your next course', style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant)),
+              Text(
+                'Find your next course',
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+              ),
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
@@ -389,8 +454,12 @@ class _ExploreCard extends StatelessWidget {
                   icon: const Icon(Icons.explore_outlined, size: 15),
                   label: const Text('Explore', style: TextStyle(fontSize: 11)),
                   style: FilledButton.styleFrom(
-                    backgroundColor: isDark ? Colors.white : const Color(0xFF111111),
-                    foregroundColor: isDark ? const Color(0xFF111111) : Colors.white,
+                    backgroundColor: isDark
+                        ? Colors.white
+                        : const Color(0xFF111111),
+                    foregroundColor: isDark
+                        ? const Color(0xFF111111)
+                        : Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -408,7 +477,11 @@ class _AccountFooter extends StatelessWidget {
   final UserEntity? user;
   final VoidCallback onTap;
   final Future<void> Function() onSignOut;
-  const _AccountFooter({required this.user, required this.onTap, required this.onSignOut});
+  const _AccountFooter({
+    required this.user,
+    required this.onTap,
+    required this.onSignOut,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -416,7 +489,11 @@ class _AccountFooter extends StatelessWidget {
     final name = user?.fullName ?? 'Guest User';
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 10, 10, 14),
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.75)))),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.75)),
+        ),
+      ),
       child: Row(
         children: [
           Expanded(
@@ -428,8 +505,22 @@ class _AccountFooter extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                    Text(user?.isTeacher == true ? 'Instructor' : 'Student', style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant)),
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      user?.isTeacher == true ? 'Instructor' : 'Student',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
                   ],
                 ),
               ),

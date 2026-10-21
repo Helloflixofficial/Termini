@@ -10,6 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/widgets/responsive_layout.dart';
 
+const _marketPageSize = 250;
+
 final listingMarketProvider = FutureProvider.autoDispose<Map<String, dynamic>>((
   ref,
 ) async {
@@ -60,19 +62,29 @@ class ListingScreen extends ConsumerStatefulWidget {
 
 class _ListingScreenState extends ConsumerState<ListingScreen> {
   final _searchController = TextEditingController();
+  late final ScrollController _scrollController;
   String _query = '';
   String _filter = 'All';
   Set<String> _favorites = {};
+  final List<Map<String, dynamic>> _additionalCoins = [];
+  int _nextPage = 2;
+  bool _hasMore = true;
+  bool _loadingMore = false;
+  Object? _loadMoreError;
 
   @override
   void initState() {
     super.initState();
+    _scrollController = ScrollController()..addListener(_maybeLoadMore);
     _loadFavorites();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController
+      ..removeListener(_maybeLoadMore)
+      ..dispose();
     super.dispose();
   }
 
@@ -128,6 +140,43 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
     return coins;
   }
 
+  void _maybeLoadMore() {
+    if (!_scrollController.hasClients ||
+        _scrollController.position.extentAfter > 420) {
+      return;
+    }
+    _loadNextPage();
+  }
+
+  Future<void> _loadNextPage() async {
+    if (_loadingMore || !_hasMore) return;
+    setState(() {
+      _loadingMore = true;
+      _loadMoreError = null;
+    });
+    try {
+      final page = _nextPage;
+      final response = await ref
+          .read(apiClientProvider)
+          .get('/api/crypto/markets', queryParameters: {'page': page});
+      final body = Map<String, dynamic>.from(response.data as Map);
+      final rows = (body['markets'] as List? ?? const [])
+          .whereType<Map>()
+          .map((coin) => Map<String, dynamic>.from(coin))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _additionalCoins.addAll(rows);
+        _nextPage = page + 1;
+        _hasMore = body['hasMore'] == true && rows.length == _marketPageSize;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _loadMoreError = error);
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final market = ref.watch(listingMarketProvider);
@@ -149,12 +198,31 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
               .whereType<Map>()
               .map((item) => Map<String, dynamic>.from(item))
               .toList();
-          final coins = _visibleCoins(data['markets'] as List? ?? const []);
+          final coins = _visibleCoins([
+            ...(data['markets'] as List? ?? const []),
+            ..._additionalCoins,
+          ]);
           return RefreshIndicator(
-            onRefresh: () async => ref.refresh(listingMarketProvider.future),
+            onRefresh: () async {
+              setState(() {
+                _additionalCoins.clear();
+                _nextPage = 2;
+                _hasMore = true;
+                _loadMoreError = null;
+              });
+              if (_scrollController.hasClients) {
+                _scrollController.jumpTo(0);
+              }
+              ref.invalidate(listingMarketProvider);
+              await ref.read(listingMarketProvider.future);
+            },
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
-              itemCount: coins.length + 5,
+              itemCount:
+                  coins.length +
+                  5 +
+                  (_hasMore || _loadingMore || _loadMoreError != null ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index == 0) {
                   return _PageHeading(updatedAt: data['updatedAt']?.toString());
@@ -173,6 +241,13 @@ class _ListingScreenState extends ConsumerState<ListingScreen> {
                 }
                 if (index == 4) {
                   return _MarketTableHeader(color: scheme.onSurfaceVariant);
+                }
+                if (index >= coins.length + 5) {
+                  return _LoadMoreFooter(
+                    loading: _loadingMore,
+                    error: _loadMoreError,
+                    onTap: _loadNextPage,
+                  );
                 }
                 final coin = coins[index - 5];
                 return _CoinMarketRow(
@@ -1178,6 +1253,49 @@ class _LearningNote extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LoadMoreFooter extends StatelessWidget {
+  final bool loading;
+  final Object? error;
+  final VoidCallback onTap;
+
+  const _LoadMoreFooter({
+    required this.loading,
+    required this.error,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 22),
+        child: Center(
+          child: SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      child: Center(
+        child: OutlinedButton.icon(
+          onPressed: onTap,
+          icon: Icon(
+            error == null ? Icons.expand_more_rounded : Icons.refresh_rounded,
+          ),
+          label: Text(
+            error == null ? 'Load more coins' : 'Retry loading coins',
+          ),
+          style: OutlinedButton.styleFrom(foregroundColor: scheme.primary),
+        ),
       ),
     );
   }
